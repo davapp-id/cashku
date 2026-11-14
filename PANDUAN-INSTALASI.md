@@ -176,28 +176,6 @@ Claude akan memandu tahap ini satu per satu di percakapan.
 
 ## Memperbarui aplikasi
 
-> **Pembaruan 1.0.24 (hanya tampilan)**: cukup push ZIP. `Kode.gs` sama dengan 1.0.22, tidak ada APK baru.
-> - **Chat lebih hidup.** Pesan muncul halus (memudar dan sedikit naik), tombol pilihan menyusul satu per satu, dan daftar chat bergulir lembut ke bawah.
-> - **Ada titik "sedang mengetik"** sesaat (±0,5 detik) sebelum CashKu membalas, seperti WhatsApp.
-> - Riwayat lama tidak ikut beranimasi saat chat dibuka. Bila HP memakai pengaturan "kurangi animasi", animasinya otomatis dimatikan.
->
-> **Pembaruan 1.0.23 (hanya tampilan)**: cukup push ZIP. `Kode.gs` sama dengan 1.0.22, tidak ada APK baru.
-> - **Chat lebih paham kalimat pendek tanpa kata tanya.**
->   - Nama dompet saja → saldonya: *Tabungan*, *Uang tunai*, *gopay*, *tabunganku*, *dompet*, *sisa*.
->   - *Uang masuk bulan ini*, *uang keluar minggu ini*, *penghasilan*, *belanja bulan ini* → pemasukan / pengeluaran.
->   - Bisa per dompet: *uang masuk rekening bulan ini*, *pengeluaran gopay bulan ini*.
->   - Periode saja (*bulan ini*, *minggu lalu*, *oktober*) → ringkasan; *riwayat tabungan* → saldo + gerakan terakhir.
-> - **Salah ketik & singkatan lebih banyak dipahami:** *Gaji nasuk* → Gaji, *msk*, *klr*, *sldo*, *gajih*, *duit msk bln ini*.
-> - **Kalimat belum lengkap dibantu:** *bayar* → ditanya bayar apa & berapa; *tarik tunai*, *top up gopay*, *isi gopay* → ditanya nominalnya.
-> - Bila tetap belum paham, saran tombolnya menyesuaikan isi pesan (saldo dompet yang disebut, uang masuk, rincian kategori).
->
-> **Pembaruan 1.0.22 (semua isi 1.0.19–1.0.21 + perbaikan di bawah)**: ganti `Kode.gs` → **Simpan** → **Kelola deployment → Edit → Versi baru → Terapkan**, lalu push ZIP. Tidak ada APK baru.
-> - **Ikon Tabungan bukan babi lagi**, diganti kantong uang 💰. Data dompet lama di Google Sheet ikut diganti otomatis saat pertama login setelah update. Saldo gabungan saat fitur dompet nonaktif memakai ikon 👛 *Uang*.
-> - **Tombol bawaan HP (kembali · beranda · menu) tidak tercampur tampilan lagi.**
->   - Di belakang tombol HP sekarang ada latar polos sewarna halaman, jadi isi halaman tidak terlihat di belakangnya saat digulir.
->   - Warna tombol HP ikut mode Terang/Gelap aplikasi.
->   - Berlaku otomatis di APK yang sudah terpasang (tidak perlu pasang APK baru).
->
 > **Pembaruan 1.0.21 (semua isi 1.0.19–1.0.20 + perbaikan di bawah)**: ganti `Kode.gs` → **Simpan** → **Kelola deployment → Edit → Versi baru → Terapkan**, lalu push ZIP. Tidak ada APK baru.
 > - **Admin bukan "kepala keluarga" lagi.**
 >   - Peran di CashKu: **Admin** (boleh ayah atau ibu), **Dewasa**, atau **Anak**.

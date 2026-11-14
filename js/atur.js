@@ -89,8 +89,8 @@
   ALUR.akun = {
     judul: 'tambah akun', perintah: 'tambah akun',
     langkah: [
-      { k: 'nama', tanya: () => ({ teks: 'Siapa nama anggota barunya?', sub: 'Contoh: **Rina**' }),
-        jawab: (t, d) => { const v = String(t).replace(/[^A-Za-zÀ-ÿ' \-]/g, ' ').replace(/\s+/g, ' ').trim(); if (/\d/.test(t) || v.length < 2 || v.split(' ').length > 3) return 'Namanya cukup 1–3 kata huruf saja, ya. Contoh: **Rina**'; d.nama = v.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); } },
+      { k: 'nama', tanya: () => ({ teks: 'Siapa nama anggota barunya?', sub: 'Contoh: **Bunda**' }),
+        jawab: (t, d) => { const v = String(t).replace(/[^A-Za-zÀ-ÿ' \-]/g, ' ').replace(/\s+/g, ' ').trim(); if (/\d/.test(t) || v.length < 2 || v.split(' ').length > 3) return 'Namanya cukup 1–3 kata huruf saja, ya. Contoh: **Bunda**'; d.nama = v.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()); } },
       { k: 'peran', tanya: (d) => ({ teks: '**' + d.nama + '** perannya apa di CashKu?', sub: '**Admin** bisa mengatur akun, anggaran, kategori, dan dompet (boleh ayah atau ibu). **Dewasa** mencatat & melihat semua. **Anak** hanya mencatat.', chips: Object.keys(PERAN).map((k) => ({ label: PERAN[k].label })) }),
         jawab: (t, d) => { if (!aturPeran(t, d)) return 'Pilih salah satu: **Admin**, **Dewasa**, atau **Anak**.'; } },
       langkahSapa,
@@ -111,7 +111,7 @@
       '\n• Username: **' + d.username + '**\n• Password awal: **' + d.password + '**', sub: 'Simpan password ini dan berikan ke ' + d.nama + '. Menyimpan akun butuh internet.', ya: 'Simpan' }),
     async simpan(d) {
       const res = await panggil('penggunaSimpan', { id: '', nama_tampilan: d.nama, username: d.username, peran: PERAN[d.peran].peran, hubungan: d.hub || (d.peran === 'ANAK' ? 'ANAK' : ''),
-        izin_lihat: d.peran === 'ANAK' ? d.izin || 'SENDIRI' : 'SEMUA', id_dompet_default: (S.dompetAktif()[0] || {}).id_dompet || '', password: d.password });
+        izin_lihat: d.peran === 'ANAK' ? d.izin || 'SENDIRI' : 'SEMUA', id_dompet_default: (S.master.dompet.find((x) => x.aktif !== false && !S.dompetKlon(x) && !x.pemilik) || {}).id_dompet || '', password: d.password });
       if (res.offline) return { ulang: 'Sedang offline 📴 Akun baru butuh internet. Ketuk **Simpan** lagi saat sudah online.' };
       if (!res.success) return { ulang: 'Belum bisa disimpan: ' + res.message };
       return { teks: 'Akun **' + d.nama + '** sudah dibuat ✅\nMasuk dengan username **' + d.username + '** dan password **' + d.password + '**.', sub: 'Peran: ' + PERAN[d.peran].label + '. ' + d.nama + ' bisa mengganti password sendiri setelah masuk.' };
@@ -294,7 +294,7 @@
   Atur.menu = function () {
     const chips = ['Tambah akun', 'Ubah akun', 'Nonaktifkan akun', 'Atur anggaran', 'Tambah kategori', 'Ganti nama kategori', 'Tambah dompet', 'Target tabungan']
       .map((x) => ({ label: x, aksi: 'kirim', nilai: { teks: x.toLowerCase() } }));
-    return Chat().tambah({ kind: 'pilihan', data: { teks: 'Ini yang bisa diatur lewat chat ⚙️', sub: admin() ? 'Ketuk salah satu, atau ketik langsung, misalnya **anggaran jajan 500rb** atau **tambah akun Rina istri**.' : 'Perubahan ini hanya bisa dilakukan Admin (' + namaAdmin() + ').',
+    return Chat().tambah({ kind: 'pilihan', data: { teks: 'Ini yang bisa diatur lewat chat ⚙️', sub: admin() ? 'Ketuk salah satu, atau ketik langsung, misalnya **anggaran jajan 500rb** atau **tambah akun Bunda istri**.' : 'Perubahan ini hanya bisa dilakukan Admin (' + namaAdmin() + ').',
       chips: admin() ? chips.concat([{ label: 'Buka halaman Pengaturan', aksi: 'buka', nilai: { halaman: 'atur' }, gaya: 'ghost' }]) : [{ label: 'Buka halaman Pengaturan', aksi: 'buka', nilai: { halaman: 'atur' } }] } });
   };
   /** Mulai sesi. data = isian dari pesan pertama ("tambah akun Rina istri"). */
@@ -406,7 +406,8 @@
   Atur.targetDaftar = function () {
     const xs = (S.master.target || []).filter((x) => x.aktif !== false);
     if (!xs.length) return Chat().tambah({ kind: 'pilihan', data: { teks: 'Belum ada target tabungan 🎯', sub: 'Contoh: **target tabungan motor 15jt 24 bulan**', chips: admin() ? [{ label: 'Buat target', aksi: 'kirim', nilai: { teks: 'target tabungan' } }] : [] } });
-    const saldo = (id) => { const s = S.saldoDompet().find((x) => x.dompet.id_dompet === id); return s ? s.saldo : 0; };
+    // 1.0.29: saat saldo masing-masing, saldo dompet keluarga = jumlah salinannya yang terlihat
+    const saldo = (id) => S.saldoDompet().filter((x) => x.dompet.id_dompet === id || String(x.dompet.id_dompet).split('~')[0] === id).reduce((a, x) => a + x.saldo, 0);
     const baris = xs.map((x) => { const b = sisaBulan(x.tenggat); return '• **' + x.nama + '**: ' + rp(x.nominal) + ' sampai ' + blnLabel(x.tenggat) + ' → ±' + rp(Math.ceil(x.nominal / b / 1000) * 1000) + '/bulan'; });
     const dps = Array.from(new Set(xs.map((x) => x.id_dompet).filter(Boolean)));
     const sub = dps.map((id) => 'Saldo ' + (S.dompet(id) || {}).nama + ' sekarang: ' + rp(saldo(id))).join(' · ');

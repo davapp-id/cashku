@@ -182,7 +182,8 @@
   // ----------------------------------------------------------------
   let IDX = null, IDX_KEY = '';
   function siapkan(ctx) {
-    const key = (ctx.versi || (ctx.kamus.length + ':' + ctx.dompet.length + ':' + ctx.anggota.length + ':' + ctx.kategori.length)) +
+    const key = (ctx.versi || (ctx.kamus.length + ':' + ctx.dompet.length + ':' + ctx.anggota.length + ':' + ctx.kategori.length)) + ':' + ((ctx.saya || {}).id || '') +
+      ':' + (ctx.anggota || []).map((a) => a.id + (a.hubungan || '') + (a.panggilan || '') + (a.aktif === false ? 'x' : '')).join(',') +
       ':' + (ctx.typo || []).length + ':' + (ctx.ingatan || []).map((x) => x.label).join('|') + ':' + (ctx.aliasCatatan || []).length;
     if (IDX && IDX_KEY === key) return IDX;
     const katAktif = {};
@@ -216,12 +217,33 @@
     ctx.anggota.forEach((a) => {
       [a.nama, a.username].filter(Boolean).forEach((x) => anggota.push({ frasa: normal(x), id: a.id }));
     });
+    // 1.0.29: anggota keluarga yang bisa dikirimi uang ("transfer istri 100rb", "kasih Rafi 20rb")
+    const kirim = [], kembar = new Set();
+    const saya = ctx.saya || {};
+    const lain = (ctx.anggota || []).filter((a) => a.aktif !== false && a.id !== saya.id);
+    const tambahK = (f, id) => {
+      f = normal(f || '');
+      if (!f || f.length < 3 || /^(saya|aku|kami|semua|keluarga|admin)$/.test(f)) return;
+      const ada = kirim.find((e) => e.frasa === f);
+      if (ada) { if (ada.id !== id) kembar.add(f); return; }
+      kirim.push({ frasa: f, id });
+    };
+    lain.forEach((a) => { tambahK(a.nama, a.id); tambahK(String(a.nama || '').split(' ')[0], a.id); tambahK(a.panggilan, a.id); tambahK(a.username, a.id); });
+    const hub = (h) => lain.filter((a) => String(a.hubungan || '').toUpperCase() === h);
+    const satu = (arr) => (arr.length === 1 ? arr[0].id : null);
+    const istri = satu(hub('ISTRI')) || (String(saya.hubungan || '').toUpperCase() === 'SUAMI' ? satu(lain.filter((a) => /^(KEPALA)$/.test(String(a.hubungan || '').toUpperCase()))) : null);
+    const suami = satu(hub('SUAMI')) || (String(saya.hubungan || '').toUpperCase() === 'ISTRI' ? satu(hub('KEPALA')) : null);
+    const anak = satu(lain.filter((a) => String(a.hubungan || '').toUpperCase() === 'ANAK' || (a.peran === 'ANAK' && !a.hubungan)));
+    if (istri) ['istri', 'istriku', 'bini', 'nyonya'].forEach((f) => tambahK(f, istri));
+    if (suami) ['suami', 'suamiku'].forEach((f) => tambahK(f, suami));
+    if (anak) ['anak', 'anakku'].forEach((f) => tambahK(f, anak));
+    const kirimAnggota = kirim.filter((e) => !kembar.has(e.frasa)).sort(byLen);
     // Penanda bawaan yang selalu berlaku walau database dibuat sebelum kata ini ada
     PINDAH_BAWAAN.forEach((f) => { if (!pindah.some((e) => e.frasa === f)) pindah.push({ frasa: f }); });
     kat.sort(byLen); masuk.sort(byLen); pindah.sort(byLen); dompet.sort(byLen); anggota.sort(byLen);
     const known = new Set(VOCAB.concat(STOP, KATA_MASUK_HAPUS, PREP, Object.keys(ABBR), Object.values(ABBR),
       ['ini', 'itu', 'yang', 'dan', 'atau', 'saya', 'aku', 'kami', 'keluarga', 'semua', 'anggota', 'pdf', 'per', 'orang']));
-    [kat, masuk, pindah, dompet, anggota].forEach((arr) => arr.forEach((e) => e.frasa.split(/[^a-z0-9]+/).forEach((w) => w && known.add(w))));
+    [kat, masuk, pindah, dompet, anggota, kirimAnggota].forEach((arr) => arr.forEach((e) => e.frasa.split(/[^a-z0-9]+/).forEach((w) => w && known.add(w))));
     UMUM.concat(VERBA, Object.keys(BULAN_SINGKAT)).forEach((w) => known.add(w));
     (ctx.ingatan || []).forEach((x) => normal(x.label).split(/[^a-z0-9]+/).forEach((w) => w && known.add(w)));
     Object.keys(petaAlias(ctx).peta).forEach((w) => known.add(w));
@@ -230,7 +252,7 @@
     (ctx.typo || []).forEach((x) => { const a = normal(x.salah), b = normal(x.benar); if (a && b && a !== b) { typo[a] = b; b.split(' ').forEach((w) => known.add(w)); } });
     const vocab = Array.from(known).filter((w) => /^[a-z]{2,}$/.test(w));
     const ganda = KATA_GANDA.map((x) => ({ kata: x.kata, tanya: x.tanya, opsi: x.opsi.filter((o) => katAktif[o.kat] && katAktif[o.kat].jenis === 'KELUAR') }));
-    IDX = { kat, masuk, pindah, dompet, anggota, katAktif, known, ganda, typo, vocab, dompetById: Object.fromEntries(ctx.dompet.map((d) => [d.id_dompet, d])) };
+    IDX = { kat, masuk, pindah, dompet, anggota, kirimAnggota, katAktif, known, ganda, typo, vocab, dompetById: Object.fromEntries(ctx.dompet.map((d) => [d.id_dompet, d])) };
     IDX_KEY = key;
     return IDX;
   }
@@ -481,7 +503,7 @@
   }
   function cariAnggota(t, idx, ctx) {
     if (/\b(saya|aku|punyaku|milikku|ku)\b/.test(t)) return { id: ctx.saya.id, sendiri: true };
-    const a = cariSemua(t, idx.anggota)[0];
+    const a = cariSemua(t, idx.anggota)[0] || cariSemua(t, idx.kirimAnggota || [])[0];
     return a ? { id: a.id } : null;
   }
   function cariDompetQ(t, idx) {
@@ -623,6 +645,52 @@
     return w.join(' ').trim();
   }
 
+  // 1.0.29: kirim uang ke anggota keluarga. Kata kerja kirim harus ada sebelum nama/panggilan anggota.
+  const RE_KIRIM_ANGGOTA = /(?:^|\s)(transfer|tranfer|trasfer|trf|tf|transferin|tfin|kirim|kirimin|ngirim|kirimkan|kasih|kasi|ngasih|kasihkan|beri|berikan|ngasi|bagi|bagiin|uang jajan|uang saku|uang belanja|uang bulanan|jatah|nafkah)(?:\s+(?:ke|buat|untuk|utk|bwt|sama|ama|kepada|pada|si|uang|duit|dana|saldo|jajan|belanja|saku|bulanan))*\s*$/;
+  function cariKirimAnggota(text, idx, ctx) {
+    if (!idx.kirimAnggota || !idx.kirimAnggota.length) return null;
+    for (const h of cariSemua(text, idx.kirimAnggota)) {
+      const m = RE_KIRIM_ANGGOTA.exec(text.slice(0, h.index));
+      // "uang jajan anak 50rb" tetap pengeluaran saat saldo bersama; saat saldo masing-masing = kiriman ke dompet anak
+      if (m && /^uang /.test(m[1]) && ctx.modeSaldo !== 'MASING') continue;
+      if (m) return { id: h.id, frasa: h.frasa, index: h.index, len: h.len, verba: m[1], mulai: m.index };
+    }
+    return null;
+  }
+  /** Dompet penerima: salinan dompet yang sama milik penerima → dompet penerima sejenis → dompet penerima mana saja */
+  function dompetPenerima(ctx, sumber, idPenerima) {
+    const semua = (ctx.dompetSemua || []).filter((x) => x.aktif !== false && x.pemilik === idPenerima);
+    if (!semua.length) return null;
+    const asal = String(sumber || '').split('~')[0];
+    const d0 = (ctx.dompetSemua || []).find((x) => x.id_dompet === sumber);
+    return (semua.find((x) => x.id_dompet === asal + '~' + idPenerima) || (d0 && semua.find((x) => x.tipe === d0.tipe)) ||
+      semua.find((x) => x.tipe === 'TUNAI') || semua[0]).id_dompet;
+  }
+  function draftKirimAnggota(d, ka, tanpaNominal, dompetHits, ctx, idx) {
+    const orang = (ctx.anggota || []).find((a) => a.id === ka.id) || { nama: ka.frasa };
+    const milik = ctx.dompet.filter((x) => x.aktif !== false);
+    const tipe = (tp) => (milik.find((x) => x.tipe === tp) || {}).id_dompet || '';
+    let sumber = '';
+    if (!ctx.fiturDompet) sumber = ctx.dompetUtama || '';
+    else {
+      const pref = dompetHits.find((hh) => /\b(pakai|pake|via|lewat|dari|dengan|pakai saldo)$/.test(kataSebelum(tanpaNominal, hh.index))) || dompetHits[0];
+      if (pref) sumber = pref.id;
+      else if (/^(transfer|tranfer|trasfer|trf|tf|transferin|tfin)$/.test(ka.verba)) sumber = tipe('REKENING') || tipe('EWALLET');
+      if (!sumber) {
+        const def = ctx.saya && ctx.saya.id_dompet_default;
+        sumber = (def && def !== 'TANYA' && idx.dompetById[def] && idx.dompetById[def].tipe !== 'TABUNGAN' ? def : '') || tipe('TUNAI') || (milik.find((x) => x.tipe !== 'TABUNGAN') || {}).id_dompet || '';
+      }
+    }
+    d.jenis = 'PINDAH'; d.id_kategori = '';
+    d.id_dompet = sumber;
+    d.id_dompet_tujuan = ctx.modeSaldo === 'MASING' ? (dompetPenerima(ctx, sumber, ka.id) || '') : sumber;
+    d.pindahAnggota = { id: ka.id, nama: String(orang.nama || '').trim().split(/\s+/)[0] || U_huruf1(ka.frasa), mode: ctx.modeSaldo === 'MASING' ? 'MASING' : 'BERSAMA' };
+    d.keterangan = 'Kirim ke ' + (String(orang.nama || '').trim().split(/\s+/)[0] || U_huruf1(ka.frasa));
+    d.dompetRagu = !d.id_dompet || !d.id_dompet_tujuan;
+    d.sumberDitanya = !d.id_dompet;
+    return d;
+  }
+
   function segmenTransaksi(seg, ctx, idx, tglPesan) {
     const tg = tanggalTransaksi(seg, ctx.hariIni) || tglPesan;
     let s = seg;
@@ -646,6 +714,12 @@
     const danaUmum = (hh) => hh.frasa === 'dana' && /\b(pindah|pindahin|pindahkan|transfer|tf|kirim|uang|sumber)\s+$/.test(tanpaNominal.slice(0, hh.index)) ||
       hh.frasa === 'dana' && /^\s+(masuk|keluar|darurat|cair)\b/.test(tanpaNominal.slice(hh.index + hh.len));
     dompetHits = dompetHits.filter((hh) => !danaUmum(hh));
+    const ka = cariKirimAnggota(tanpaNominal, idx, ctx);
+    if (ka) {
+      const d0 = { teks: seg, jenis: 'PINDAH', nominal: pilih ? pilih.nilai : 0, nominalRagu: !!(pilih && !pilih.kuat), tanpaNominal: !pilih, tanggal: (tg && tg.tanggal) || ctx.hariIni };
+      if (pilih && pilih.opsi) d0.nominalOpsi = pilih.opsi;
+      return draftKirimAnggota(d0, ka, tanpaNominal, dompetHits, ctx, idx);
+    }
     let pindahM = null;
     for (const e of idx.pindah) {
       const h = cari(tanpaNominal, e.frasa);

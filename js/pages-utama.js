@@ -256,8 +256,8 @@
         const p = st.jenis === 'PINDAH';
         el.querySelector('[data-katrow]').hidden = p; el.querySelector('[data-pindahrow]').hidden = !p;
         if (p) {
-          el.querySelector('[data-dari]').innerHTML = '<span class="v">' + U.esc(S.namaDompet(st.dom)) + '</span>' + ic('chevron-down');
-          el.querySelector('[data-ke]').innerHTML = '<span class="v">' + U.esc(S.namaDompet(st.ke)) + '</span>' + ic('chevron-down');
+          el.querySelector('[data-dari]').innerHTML = '<span class="v">' + U.esc(S.namaDompetLengkap(st.dom)) + '</span>' + ic('chevron-down');
+          el.querySelector('[data-ke]').innerHTML = '<span class="v">' + U.esc(S.namaDompetLengkap(st.ke)) + '</span>' + ic('chevron-down');
         }
         U.$$('[data-jenis] button', el).forEach((b) => b.classList.toggle('on', b.dataset.v === st.jenis));
       };
@@ -269,7 +269,11 @@
         gambar();
       });
       const pilihDompet = async (kunci, judul) => {
-        const v = await UI.Sheet.pilih({ judul, opsi: S.dompetAktif().map((d) => ({ value: d.id_dompet, label: d.nama, ikon: d.ikon })), nilai: st[kunci] });
+        // 1.0.29: kiriman antar anggota (saldo masing-masing) → pilihan dompet milik orang yang sama
+        const cur = S.dompet(st[kunci]);
+        const opsi = cur && cur.pemilik && S.modeSaldo() === 'MASING' && cur.pemilik !== S.saya.id
+          ? S.master.dompet.filter((d) => d.aktif !== false && d.pemilik === cur.pemilik) : S.dompetAktif();
+        const v = await UI.Sheet.pilih({ judul, opsi: opsi.map((d) => ({ value: d.id_dompet, label: S.namaDompetLengkap(d.id_dompet), ikon: d.ikon })), nilai: st[kunci] });
         if (v) { st[kunci] = v; gambar(); }
       };
       el.querySelector('[data-kat]').onclick = async () => {
@@ -283,7 +287,8 @@
       el.querySelector('[data-simpan]').onclick = async () => {
         const n = U.angkaInput(nom.value);
         if (!(n > 0)) { nom.classList.add('err'); return UI.Toast.show('Nominal harus lebih dari 0', 'error'); }
-        if (st.jenis === 'PINDAH' && (!st.dom || !st.ke || st.dom === st.ke)) return UI.Toast.show('Pilih dompet asal dan tujuan yang berbeda', 'error');
+        const kirimAnggota = /^kirim ke /i.test(t.keterangan || '');
+        if (st.jenis === 'PINDAH' && (!st.dom || !st.ke || (st.dom === st.ke && !kirimAnggota))) return UI.Toast.show('Pilih dompet asal dan tujuan yang berbeda', 'error');
         const ket = el.querySelector('[data-ket]').value.trim() || (st.jenis === 'PINDAH' ? 'Pindah saldo' : S.kat(st.kat).nama);
         const katLama = t.id_kategori;
         await S.simpanTx({ id_transaksi: t.id_transaksi, jenis: st.jenis, nominal: n, keterangan: ket, id_kategori: st.jenis === 'PINDAH' ? '' : st.kat,

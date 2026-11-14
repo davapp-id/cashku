@@ -290,6 +290,11 @@
       if ((warn || []).some((w) => w.level === 2)) return G.kata('w2', ['Sudah aku catat ✅ Tapi ada anggaran yang kebablasan nih 👇', 'Tercatat! Eh, ada anggaran yang sudah lewat batas 👇']);
       if ((warn || []).length) return G.kata('w1', ['Sudah aku catat ✅ Anggarannya mulai menipis, hati-hati ya 👇', 'Tercatat! Tapi anggarannya hampir habis nih 👇']);
       const tabungan = (t) => t.jenis === 'PINDAH' && S.dompet(t.id_dompet_tujuan) && S.dompet(t.id_dompet_tujuan).tipe === 'TABUNGAN';
+      if (txs.every((t) => t._kirim)) {
+        const nm = Array.from(new Set(txs.map((t) => t._kirim.nama))).join(' & ');
+        if (txs[0]._kirim.mode === 'MASING') return G.kata('kirimM', ['Siap, uangnya sudah pindah ke saldo {n} 🤝', 'Beres! Saldo kamu berkurang, saldo {n} bertambah 🤝'], { n: nm });
+        return G.kata('kirimB', ['Siap, tercatat sebagai kiriman ke {n} 🤝 Saldo keluarga tetap, karena saldonya bersama.', 'Oke, kiriman ke {n} sudah aku catat 🤝 Bukan pengeluaran, jadi saldo keluarga tidak berubah.'], { n: nm });
+      }
       if (txs.every(tabungan)) return G.kata('nabung', ['Mantap, rajin nabung! 💰 Sudah aku catat.', 'Asyik, tabungan nambah! ✨', 'Keren, nabung terus ya! 💪 Sudah tercatat.']);
       if (txs.every((t) => t.jenis === 'PINDAH')) return G.kata('pindah', ['Oke, pindah saldonya sudah aku catat 🔄', 'Siap, saldonya sudah aku pindahkan di catatan 🔄']);
       if (txs.some((t) => t.jenis === 'MASUK')) return G.kata('masuk', ['Yeay, ada rezeki masuk! 💰 Sudah aku catat.', 'Asyik, ada uang masuk! 🎉 Tercatat ya.', 'Sip, pemasukannya sudah aku catat 💰']);
@@ -315,7 +320,7 @@
     const k = pindah || saldo ? { ikon: S.ikonTx(t), warna: saldo ? '#64748B' : '#2563EB', nama: S.judulTx(t) } : S.kat(t.id_kategori);
     const dompet = S.fiturDompet() && t.id_dompet ? S.namaDompet(t.id_dompet) : '';
     let sub;
-    if (pindah) sub = S.namaDompet(t.id_dompet) + ' \u2192 ' + S.namaDompet(t.id_dompet_tujuan);
+    if (pindah) sub = t.id_dompet && t.id_dompet === t.id_dompet_tujuan ? S.namaDompet(t.id_dompet) + ' \u00b7 antar anggota' : S.namaDompetLengkap(t.id_dompet) + ' \u2192 ' + S.namaDompetLengkap(t.id_dompet_tujuan);
     else if (saldo) sub = S.namaDompet(t.id_dompet) + ' \u00b7 ' + t.keterangan;
     else if (t.jenis === 'MASUK') sub = (t.keterangan.toLowerCase() === k.nama.toLowerCase() ? 'Pemasukan' : k.nama) + (dompet ? ' \u00b7 ' + dompet : '');
     else sub = k.nama + (dompet ? ' \u00b7 ' + dompet : '');
@@ -902,8 +907,10 @@
     if (um && um.from === 'me') { um.data.batch = batch; g.DB.put('chat', um); }
     const konfKecil = String(S.master.pengaturan.konfirmasi_nominal_kecil || 'ON') === 'ON';
     let pindahOff = false;
+    const tanpaDompet = [];
     drafts.forEach((d) => {
       if (d.pindahNonaktif) { pindahOff = true; return; }
+      if (d.pindahAnggota && (!d.id_dompet || !d.id_dompet_tujuan)) { tanpaDompet.push(d); return; }
       if (d.tanpaNominal) klar.push({ type: 'harga', d });
       else if (d.nominalOpsi || (d.nominalRagu && konfKecil)) klar.push({ type: 'nominal', d });
       else if (d.jenis === 'PINDAH' && d.dompetRagu) klar.push({ type: 'dompet', d });
@@ -916,6 +923,8 @@
     tanyaD.forEach((d) => { const kk = (d.dompetPilihan || []).join(',') || '*'; (grup[kk] = grup[kk] || []).push(d); });
     Object.keys(grup).forEach((kk) => klar.push({ type: 'dompetBayar', ds: grup[kk], pilihan: kk === '*' ? null : kk.split(',') }));
     if (jelas.length) await Chat.simpanDrafts(jelas, teksAsli, batch);
+    for (const d of tanpaDompet) await Chat.sistem(!d.id_dompet ? 'Kamu belum punya dompet untuk mengirim uang. Minta Admin mengaktifkan dompetmu di **Pengaturan → Kelola dompet**.'
+      : '**' + d.pindahAnggota.nama + '** belum punya dompet untuk menerima. Admin bisa mengaturnya di **Pengaturan → Mode saldo**.');
     if (pindahOff) await Chat.sistem(S.master.dompet.some((d) => d.aktif !== false && d.tipe === 'TABUNGAN')
       ? 'Dompet sedang digabung jadi satu, jadi pindah antar dompet tidak perlu dicatat. Yang tetap dicatat: **nabung** dan **ambil tabungan**.'
       : 'Dompet sedang digabung jadi satu, jadi pindah saldo tidak perlu dicatat.');
@@ -928,7 +937,8 @@
     for (const d of ds) {
       const t = await S.simpanTx({
         jenis: d.jenis, nominal: d.nominal, keterangan: d.keterangan || 'Transaksi', id_kategori: d.id_kategori || '', id_dompet: d.id_dompet || '',
-        id_dompet_tujuan: d.id_dompet_tujuan || '', tanggal_transaksi: d.tanggal || U.hariIni(), teks_asli: teksAsli, id_batch: batch, sumber: 'CHAT'
+        id_dompet_tujuan: d.id_dompet_tujuan || '', tanggal_transaksi: d.tanggal || U.hariIni(), teks_asli: teksAsli, id_batch: batch, sumber: 'CHAT',
+        _kirim: d.pindahAnggota || undefined
       });
       ids.push(t.id_transaksi); txs.push(t);
       if (d.jenis !== 'PINDAH' && d.kategoriDikenal === false) baru.push({ t, d });
@@ -1192,13 +1202,13 @@
     if (it.sapaan) patch.sapaan = it.sapaan;
     else if (!S.saya.sapaan && S.hormat(calon) !== null && !S.saya.hubungan && S.saya.peran !== 'ANAK') patch.sapaan = S.hormat(calon) || 'NAMA';
     await S.simpanSapaan(patch);
-    return Chat.tambah({ kind: 'pilihan', data: { teks: 'Baik, ' + S.sapa() + '. 😊', sub: 'Mau diganti? Ketik misalnya **panggil saya Bang ' + (S.saya.panggilan || 'Dani') + '** atau **panggil saya ' + (S.saya.panggilan || 'Dani') + ' saja**.' } });
+    return Chat.tambah({ kind: 'pilihan', data: { teks: 'Baik, ' + S.sapa() + '. 😊', sub: S.saya.panggilan ? 'Mau diganti? Ketik misalnya **panggil saya Bang ' + S.saya.panggilan + '** atau **panggil saya ' + S.saya.panggilan + ' saja**.' : 'Mau diganti? Ketik **panggil saya** lalu nama panggilanmu.' } });
   };
   Chat.namaTanya = function () {
     if (!S.saya) return;
     const peran = S.saya.peran === 'ADMIN' ? 'Admin' : S.saya.peran === 'ANAK' ? 'anak' : 'anggota keluarga';
     const akun = 'akun **@' + (S.saya.username || S.saya.nama) + '**, ' + peran;
-    if (!S.saya.panggilan) return Chat.tambah({ kind: 'pilihan', data: { teks: 'Ini ' + akun + ' 🙂 Tapi aku belum tahu nama panggilanmu.', sub: 'Ketik misalnya **nama saya Dani**.' } });
+    if (!S.saya.panggilan) return Chat.tambah({ kind: 'pilihan', data: { teks: 'Ini ' + akun + ' 🙂 Tapi aku belum tahu nama panggilanmu.', sub: 'Ketik **nama saya** lalu nama panggilanmu.' } });
     return Chat.tambah({ kind: 'pilihan', data: { teks: G.kata('siapaSy', ['Tentu tahu dong 😊 Ini **{nama}**.', 'Ingat dong, ini **{nama}** 😊', 'Ini **{nama}**, kan? 😄']) + '\n(' + akun + ')',
       sub: 'Mau ganti panggilan? Ketik **panggil saya …**' } });
   };
@@ -1650,7 +1660,7 @@
     if (!target.length) return Chat.sistem(kata ? 'Hmm, nggak ada transaksi “' + kata + '” milikmu yang bisa dibatalkan 🤔' : 'Belum ada transaksi milikmu yang bisa dibatalkan 🙂');
     return Chat.tambah({ kind: 'ringkasan', data: {
       judul: target.length > 1 ? 'Batalkan pesan terakhir?' : 'Batalkan transaksi ini?',
-      baris: target.map((t) => ({ l: S.ikonTx(t) + ' ' + S.judulTx(t) + (t.jenis === 'PINDAH' ? ' ' + S.namaDompet(t.id_dompet) + ' → ' + S.namaDompet(t.id_dompet_tujuan) : t.jenis === 'SALDO' ? ' ' + S.namaDompet(t.id_dompet) : ''), v: U.rpTanda(t.nominal, t.jenis), kelas: S.kelasJenis(t.jenis) })),
+      baris: target.map((t) => ({ l: S.ikonTx(t) + ' ' + S.judulTx(t) + (t.jenis === 'PINDAH' ? ' ' + S.namaDompetLengkap(t.id_dompet) + ' → ' + S.namaDompetLengkap(t.id_dompet_tujuan) : t.jenis === 'SALDO' ? ' ' + S.namaDompet(t.id_dompet) : ''), v: U.rpTanda(t.nominal, t.jenis), kelas: S.kelasJenis(t.jenis) })),
       chips: [{ label: 'Ya, batalkan', aksi: 'batalYa', nilai: { ids: target.map((t) => t.id_transaksi) }, gaya: 'danger' }, { label: 'Tidak', aksi: 'tutup' }]
     } });
   };
@@ -1835,6 +1845,35 @@
     let kor = catatanKoreksi(it);
     if ((it.metric === 'rincian' || it.metric === 'kemana' || it.metric === 'sering') && g.Rincian) return g.Rincian.jawab(it, kor);
 
+    if (it.metric === 'saldo' && S.modeSaldo() === 'MASING' && !it.dompet) {
+      // 1.0.29: saldo masing-masing — Admin melihat saldo per anggota, anggota lain hanya saldonya sendiri
+      const siapa = it.orang && it.orang !== S.saya.id ? it.orang : (S.isAdmin() && !it.orang ? '' : S.saya.id);
+      if (siapa && siapa !== S.saya.id && !S.isAdmin()) return Chat.sistem('Saldo anggota lain hanya bisa dilihat Admin 🙏 Ketik **saldo** untuk melihat saldomu.');
+      const per = S.saldoDompet().filter((x) => !siapa || x.dompet.pemilik === siapa);
+      const gab = (xs) => {
+        if (S.fiturDompet()) return xs.map((x) => ({ ikon: x.dompet.ikon || '💳', nama: x.dompet.nama, saldo: x.saldo }));
+        const uang = xs.filter((x) => x.dompet.tipe !== 'TABUNGAN').reduce((a, x) => a + x.saldo, 0);
+        return [{ ikon: '👛', nama: 'Uang', saldo: uang }].concat(xs.filter((x) => x.dompet.tipe === 'TABUNGAN').map((x) => ({ ikon: x.dompet.ikon || '💰', nama: x.dompet.nama, saldo: x.saldo })));
+      };
+      const rp = (v) => (v < 0 ? '−' : '') + U.rp(v);
+      const total = per.reduce((a, x) => a + x.saldo, 0);
+      let baris = [];
+      if (siapa) baris = gab(per).map((x) => ({ l: x.ikon + ' ' + x.nama, v: rp(x.saldo), kelas: x.saldo < 0 ? 't-out' : '' }));
+      else {
+        const urut = S.anggotaAktif().map((a) => a.id).concat(Array.from(new Set(per.map((x) => x.dompet.pemilik))));
+        Array.from(new Set(urut)).forEach((id) => {
+          const xs = per.filter((x) => x.dompet.pemilik === id);
+          if (!xs.length) return;
+          const sub = xs.reduce((a, x) => a + x.saldo, 0);
+          baris.push({ l: '👤 ' + S.orang(id).nama, v: rp(sub), kelas: sub < 0 ? 't-out' : '' });
+          gab(xs).filter((x) => x.saldo).forEach((x) => baris.push({ l: '\u00a0\u00a0\u00a0' + x.ikon + ' ' + x.nama, v: rp(x.saldo), kelas: 'muted' }));
+        });
+      }
+      const nama = siapa && siapa !== S.saya.id ? S.orang(siapa).nama : '';
+      return Chat.tambah({ kind: 'ringkasan', data: { judul: siapa ? (nama ? '💳 Saldo ' + nama : '💳 Saldo kamu') : '💳 Saldo keluarga', total: rp(total), kelasTotal: total < 0 ? 't-out' : '',
+        caption: siapa ? 'Saldo masing-masing · per ' + U.tglPanjang(U.hariIni()) : 'Total semua anggota · ketik **saldo** + nama anggota untuk rinciannya',
+        baris, catatan: (g.Sync.status !== 'ok' ? 'Data per ' + U.relatif(S.meta.lastSync) + '. ' : '') + kor } });
+    }
     if (it.metric === 'saldo' && !S.fiturDompet()) {
       // Dompet digabung: Uang (Tunai + Rekening + E-wallet) & Tabungan
       let s = S.saldoRingkas();

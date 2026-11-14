@@ -24,7 +24,7 @@ const SETUP = {
 
 const APP = {
   NAMA: 'CashKu',
-  VERSI: '1.0.25',
+  VERSI: '1.0.29',
   TZ: 'Asia/Makassar',
   TOKEN_HARI: 30,           // masa berlaku sesi
   JENDELA_BULAN: 24,        // transaksi yang disimpan di HP
@@ -147,6 +147,7 @@ const ROUTES = {
   penggunaReset:   { auth: 'ADMIN', fn: apiPenggunaReset_, write: true },
   dompetSimpan:    { auth: 'ADMIN', fn: apiDompetSimpan_, write: true },
   pengaturanSimpan:{ auth: 'ADMIN', fn: apiPengaturanSimpan_, write: true },
+  modeSaldo:       { auth: 'ADMIN', fn: apiModeSaldo_, write: true },
   pushKunci:       { auth: 'USER', fn: apiPushKunci_ },
   pushDaftar:      { auth: 'USER', fn: apiPushDaftar_, write: true },
   pushUji:         { auth: 'USER', fn: apiPushUji_, write: true },
@@ -466,7 +467,15 @@ function usersMap_() {
 
 function bolehLihat_(user, tx) {
   if (user.peran !== 'ANAK' || user.izin_lihat === 'SEMUA') return true;
-  return tx.id_pengguna === user.id;
+  if (tx.id_pengguna === user.id) return true;
+  // 1.0.29: kiriman dari/ke dompet miliknya sendiri (mode saldo masing-masing) tetap terlihat agar saldonya benar
+  const pm = pemilikDompet_();
+  return (!!tx.id_dompet && pm[tx.id_dompet] === user.id) || (!!tx.id_dompet_tujuan && pm[tx.id_dompet_tujuan] === user.id);
+}
+function pemilikDompet_() {
+  const m = {};
+  tableObjects_(SHEET.dompet).forEach(function (d) { if (d.pemilik) m[d.id_dompet] = String(d.pemilik); });
+  return m;
 }
 
 // ------------------------------------------------------------
@@ -877,6 +886,10 @@ function apiPenggunaSimpan_(ctx, d) {
   }
   t.dirty = true;
   writeTable_(t);
+  if (aksiLog === 'tambah' && modeSaldo_() === 'MASING') {
+    const td = readTable_(SHEET.dompet);
+    if (salinDompetAnggota_(td, [t.rows[t.rows.length - 1][t.col.id_pengguna]])) writeTable_(td);
+  }
   bumpMaster_();
   logAturLangsung_(ctx.user, 'AKUN', aksiLog + ' @' + username + ' — ' + (String(d.nama_tampilan || '').trim() || username) + ' (' + peran + (d.hubungan ? ', ' + hubungan_(d.hubungan) : '') + ')');
   return ok_({ pesan: 'Anggota disimpan.' });
@@ -906,6 +919,14 @@ function apiDompetSimpan_(ctx, d) {
   };
   const i = t.rows.findIndex(function (r) { return r[t.col.id_dompet] === obj.id_dompet; });
   if (i > -1) t.rows[i] = objToRow_(t, obj); else t.rows.push(objToRow_(t, obj));
+  // 1.0.29: dompet keluarga punya salinan per anggota (mode saldo masing-masing) → nama/jenis/ikon/alias/aktif ikut
+  if (!obj.pemilik && String(obj.id_dompet).indexOf('~') < 0) {
+    t.rows.forEach(function (r) {
+      if (String(r[t.col.id_dompet]).split('~')[0] !== obj.id_dompet || String(r[t.col.id_dompet]) === obj.id_dompet) return;
+      ['nama', 'tipe', 'ikon', 'alias', 'aktif'].forEach(function (k) { r[t.col[k]] = obj[k]; });
+    });
+    if (i < 0 && modeSaldo_() === 'MASING') salinDompetAnggota_(t, null, [obj.id_dompet]);
+  }
   t.dirty = true;
   writeTable_(t);
   bumpMaster_();
@@ -925,6 +946,110 @@ function apiPengaturanSimpan_(ctx, d) {
   writeTable_(t);
   bumpMaster_();
   return ok_({ pesan: 'Pengaturan disimpan.' });
+}
+
+// ------------------------------------------------------------
+// 9b. MODE SALDO KELUARGA (1.0.29)
+//   BERSAMA  : semua anggota memakai dompet keluarga yang sama (bawaan).
+//   MASING   : tiap anggota punya salinan dompet keluarga sendiri (id "<dompet>~<pengguna>").
+//   Ganti ke MASING → saldo dompet keluarga dibagi Admin ke anggota (transaksi PINDAH "Pembagian saldo").
+//   Ganti ke BERSAMA → saldo semua salinan digabung lagi ke dompet keluarga ("Gabung saldo").
+// ------------------------------------------------------------
+function modeSaldo_() { return String(pengaturanMap_().mode_saldo || 'BERSAMA').toUpperCase() === 'MASING' ? 'MASING' : 'BERSAMA'; }
+/** Buat/aktifkan salinan dompet keluarga untuk anggota. idsOrang/idsDompet null = semua yang aktif. Mengembalikan true bila tabel berubah. */
+function salinDompetAnggota_(td, idsOrang, idsDompet) {
+  const orang = idsOrang || tableObjects_(SHEET.pengguna).filter(function (u) { return truthy_(u.aktif); }).map(function (u) { return u.id_pengguna; });
+  const sumber = td.rows.filter(function (r) {
+    const id = String(r[td.col.id_dompet]);
+    return id.indexOf('~') < 0 && !r[td.col.pemilik] && truthy_(r[td.col.aktif]) && (!idsDompet || idsDompet.indexOf(id) > -1);
+  });
+  const ada = {};
+  td.rows.forEach(function (r, i) { ada[String(r[td.col.id_dompet])] = i; });
+  let ubah = false;
+  sumber.forEach(function (r) {
+    orang.forEach(function (uid) {
+      const id = String(r[td.col.id_dompet]) + '~' + uid;
+      if (ada[id] !== undefined) {
+        const rr = td.rows[ada[id]];
+        if (!truthy_(rr[td.col.aktif])) { rr[td.col.aktif] = true; ubah = true; }
+        return;
+      }
+      td.rows.push(objToRow_(td, { id_dompet: id, nama: r[td.col.nama], tipe: r[td.col.tipe], pemilik: uid, saldo_awal: 0,
+        tanggal_saldo_awal: tglStr_(new Date()), ikon: r[td.col.ikon], alias: r[td.col.alias], aktif: true, diterima_server: Date.now() }));
+      ubah = true;
+    });
+  });
+  if (ubah) td.dirty = true;
+  return ubah;
+}
+/** Saldo terkini semua dompet menurut server (saldo awal + semua transaksi aktif sejak tanggal saldo awal) */
+function saldoServer_() {
+  const dompet = tableObjects_(SHEET.dompet), byId = {}, basis = {};
+  dompet.forEach(function (d) { d.tanggal_saldo_awal = tgl_(d.tanggal_saldo_awal); byId[d.id_dompet] = d; basis[d.id_dompet] = Number(d.saldo_awal) || 0; });
+  const t = readTable_(SHEET.transaksi);
+  t.rows.forEach(function (r) { const o = rowToTx_(t, r); if (o.status === 'AKTIF') tambahBasis_(basis, byId, o); });
+  return basis;
+}
+function apiModeSaldo_(ctx, d) {
+  const mode = String(d.mode || '').toUpperCase();
+  if (mode !== 'MASING' && mode !== 'BERSAMA') return fail_('Mode saldo tidak dikenal.');
+  if (mode === modeSaldo_()) return fail_(mode === 'MASING' ? 'Saldo sudah masing-masing.' : 'Saldo sudah bersama.');
+  const td = readTable_(SHEET.dompet);
+  const now = Date.now(), hari = tglStr_(new Date()), waktu = iso_(new Date()), batch = 'MODE-' + now.toString(36).toUpperCase();
+  const uid = ctx.user.id, kode = String(uid).replace(/^USR-/, '');
+  const txs = [];
+  let n = 0;
+  const pindah = function (dari, ke, nominal, ket) {
+    const v = Math.round(Number(nominal) || 0);
+    if (!v) return;
+    const a = v > 0 ? dari : ke, b = v > 0 ? ke : dari;
+    txs.push(txToRow_({ id_transaksi: 'TRX-' + hari.replace(/-/g, '') + '-' + kode + '-M' + now.toString(36).slice(-4).toUpperCase() + (++n),
+      id_batch: batch, waktu_catat: waktu, tanggal_transaksi: hari, id_pengguna: uid, jenis: 'PINDAH', nominal: Math.abs(v), keterangan: ket,
+      id_kategori: '', id_dompet: a, id_dompet_tujuan: b, teks_asli: '', sumber: 'MODE', status: 'AKTIF', diubah_oleh: uid, diubah_pada: waktu }, 1, now));
+  };
+  const saldo = saldoServer_();
+  const ringkas = [];
+  if (mode === 'MASING') {
+    salinDompetAnggota_(td, null, null);
+    const anggota = tableObjects_(SHEET.pengguna).filter(function (u) { return truthy_(u.aktif); }).map(function (u) { return u.id_pengguna; });
+    const bagi = d.bagi || {};
+    const keluarga = td.rows.filter(function (r) { return String(r[td.col.id_dompet]).indexOf('~') < 0 && !r[td.col.pemilik] && truthy_(r[td.col.aktif]); });
+    for (let i = 0; i < keluarga.length; i++) {
+      const id = String(keluarga[i][td.col.id_dompet]), nama = String(keluarga[i][td.col.nama]);
+      const total = Math.round(saldo[id] || 0);
+      const per = bagi[id] || {};
+      const jumlah = Object.keys(per).reduce(function (a, k) { return a + Math.round(Number(per[k]) || 0); }, 0);
+      if (!Object.keys(per).length) { if (total) per[uid] = total; }           // tidak dibagi → semua ke Admin
+      else if (jumlah !== total) return fail_('Saldo ' + nama + ' sekarang ' + rupiah_(total) + ', tetapi yang dibagi ' + rupiah_(jumlah) + '. Muat ulang lalu bagi lagi.', { code: 'SALDO_BERUBAH', saldo: saldo });
+      Object.keys(per).forEach(function (k) {
+        if (anggota.indexOf(k) < 0) return;
+        pindah(id, id + '~' + k, per[k], 'Pembagian saldo');
+      });
+      if (total) ringkas.push(nama + ' ' + rupiah_(total));
+    }
+  } else {
+    td.rows.forEach(function (r) {
+      const id = String(r[td.col.id_dompet]);
+      if (id.indexOf('~') < 0) return;
+      const asal = id.split('~')[0];
+      const v = Math.round(saldo[id] || 0);
+      if (v && td.rows.some(function (x) { return String(x[td.col.id_dompet]) === asal; })) pindah(id, asal, v, 'Gabung saldo');
+    });
+    // dompet keluarga yang sempat dinonaktifkan tetapi menerima gabungan → aktifkan lagi
+    td.rows.forEach(function (r) {
+      const id = String(r[td.col.id_dompet]);
+      if (id.indexOf('~') < 0 && !r[td.col.pemilik] && !truthy_(r[td.col.aktif]) && txs.some(function (x) { return x[10] === id; })) { r[td.col.aktif] = true; td.dirty = true; }
+    });
+  }
+  if (td.dirty) writeTable_(td);
+  if (txs.length) appendRows_(SHEET.transaksi, txs);
+  const tp = readTable_(SHEET.pengaturan);
+  const j = tp.rows.findIndex(function (r) { return r[0] === 'mode_saldo'; });
+  if (j > -1) tp.rows[j][1] = mode; else tp.rows.push(['mode_saldo', mode]);
+  writeTable_(tp);
+  bumpMaster_();
+  logAturLangsung_(ctx.user, 'SALDO', mode === 'MASING' ? 'saldo masing-masing' + (ringkas.length ? ' (dibagi: ' + ringkas.join(', ') + ')' : '') : 'saldo bersama (digabung)');
+  return ok_({ pesan: mode === 'MASING' ? 'Saldo sekarang masing-masing.' : 'Saldo keluarga sekarang bersama.', mode: mode, transaksi: txs.length });
 }
 
 // ------------------------------------------------------------

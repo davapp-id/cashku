@@ -6,8 +6,10 @@
   const PERAN = { ADMIN: ['Admin', 'b-green'], DEWASA: ['Dewasa', 'b-blue'], ANAK: ['Anak', 'b-amber'] };
 
   const labelDefault = (id) => (id === 'TANYA' ? 'Tanya dulu' : S.namaDompet(id));
-  const opsiDefault = (pilih) => '<option value="TANYA"' + (pilih === 'TANYA' ? ' selected' : '') + '>\u2753 Tanya dulu setiap transaksi</option>' +
-    S.dompetAktif().filter((d) => d.tipe !== 'TABUNGAN').map((d) => '<option value="' + U.esc(d.id_dompet) + '"' + (d.id_dompet === pilih ? ' selected' : '') + '>' + U.esc(d.ikon || '') + ' ' + U.esc(d.nama) + '</option>').join('');
+  // 1.0.29: dompet default disimpan sebagai dompet keluarga; saat saldo masing-masing otomatis memakai salinan milik anggota
+  const dasarDompet = () => S.master.dompet.filter((d) => d.aktif !== false && !S.dompetKlon(d) && (!d.pemilik || S.modeSaldo() !== 'MASING'));
+  const opsiDefault = (pilih) => (pilih = String(pilih || '').split('~')[0], '<option value="TANYA"' + (pilih === 'TANYA' ? ' selected' : '') + '>\u2753 Tanya dulu setiap transaksi</option>' +
+    dasarDompet().filter((d) => d.tipe !== 'TABUNGAN').map((d) => '<option value="' + U.esc(d.id_dompet) + '"' + (d.id_dompet === pilih ? ' selected' : '') + '>' + U.esc(d.ikon || '') + ' ' + U.esc(d.nama) + '</option>').join(''));
 
   async function panggilOnline(action, data, btn) {
     if (!UI.perluOnline()) return null;
@@ -194,6 +196,7 @@
     if (S.isAdmin() || S.fiturDompet()) {
       h += '<div class="sec">Dompet</div><div class="list-group">';
       if (S.isAdmin()) h += '<label class="list-row"><span class="ico-c sm">' + ic('wallet', 'ic-sm') + '</span><span class="grow"><b style="font-weight:500;display:block">Aktifkan fitur dompet</b><span class="small muted">Pisahkan saldo Tunai, Rekening, dan E-Wallet</span></span><span class="switch"><input type="checkbox" data-fitur' + (S.fiturDompet() ? ' checked' : '') + '><i></i></span></label>';
+      if (S.isAdmin()) h += row('data-go="modeSaldo"', 'users', 'Mode saldo keluarga', '<span class="small muted">' + (S.modeSaldo() === 'MASING' ? 'Masing-masing' : 'Bersama') + '</span>');
       if (S.isAdmin()) h += row('data-go="dompet"', 'sliders-horizontal', 'Kelola dompet', '<span class="small muted">' + S.dompetAktif().length + ' dompet</span>');
       else h += row('data-go="akun"', 'wallet', 'Dompet default', '<span class="small muted">' + U.esc(labelDefault(s.id_dompet_default)) + '</span>');
       h += '</div>';
@@ -482,7 +485,7 @@
       const saldo = Object.fromEntries(S.saldoDompet().map((x) => [x.dompet.id_dompet, x.saldo]));
       const adaTab = S.master.dompet.some((d) => d.tipe === 'TABUNGAN');
       el.querySelector('[data-body]').innerHTML = (!adaTab ? '<div class="banner amber" style="margin-bottom:12px">' + ic('triangle-alert') + '<span class="small">Dompet <b>Tabungan</b> belum ada di server. Tempel ulang <b>Kode.gs</b> versi terbaru di Apps Script, jalankan <b>migrasiData</b>, lalu buat <b>Versi baru</b> pada deployment.</span></div>' : '') + (navigator.onLine === false ? '<div class="banner amber" style="margin-bottom:12px">' + ic('cloud-off') + '<span class="small">Mengubah dompet perlu koneksi internet.</span></div>' : '') +
-        '<div class="list-group">' + S.master.dompet.map((d) => '<button class="list-row" data-dmp="' + U.esc(d.id_dompet) + '"' + (d.aktif === false ? ' style="opacity:.5"' : '') + '><span class="ico-c">' + U.esc(d.ikon || '💳') + '</span><span class="grow"><b style="display:block;font-weight:600">' + U.esc(d.nama) + '</b><span class="small muted">' + ({ TUNAI: 'Tunai', REKENING: 'Rekening bank', EWALLET: 'E-wallet', TABUNGAN: 'Tabungan' })[d.tipe] + (d.pemilik ? ' · milik ' + U.esc(S.orang(d.pemilik).nama) : ' · keluarga') + '</span></span>' +
+        '<div class="list-group">' + S.master.dompet.filter((d) => !S.dompetKlon(d) || S.modeSaldo() === 'MASING').map((d) => '<button class="list-row" data-dmp="' + U.esc(d.id_dompet) + '"' + (d.aktif === false ? ' style="opacity:.5"' : '') + '><span class="ico-c">' + U.esc(d.ikon || '💳') + '</span><span class="grow"><b style="display:block;font-weight:600">' + U.esc(d.nama) + '</b><span class="small muted">' + ({ TUNAI: 'Tunai', REKENING: 'Rekening bank', EWALLET: 'E-wallet', TABUNGAN: 'Tabungan' })[d.tipe] + (d.pemilik ? ' · milik ' + U.esc(S.orang(d.pemilik).nama) : ' · keluarga') + '</span></span>' +
           (d.aktif === false ? '<span class="badge b-slate">Nonaktif</span>' : '<b class="num">' + U.rp(saldo[d.id_dompet] || 0) + '</b>') + ic('chevron-right', 'chev') + '</button>').join('') + '</div>' +
         '<div class="card" style="margin-top:16px;border:1px solid var(--danger-bg)"><div class="row" style="gap:12px;align-items:flex-start"><span class="ico-c sm" style="background:var(--danger-bg);color:var(--expense)">' + ic('refresh-cw', 'ic-sm') + '</span>' +
         '<span class="grow"><b style="display:block;font-weight:600">Atur ulang saldo</b><span class="small muted">Jadikan saldo dompet 0 (atau angka baru). Riwayat transaksi tetap ada. Bisa juga lewat chat: <b>reset saldo gopay</b>.</span>' +
@@ -491,6 +494,94 @@
         '<p class="help">💰 <b>Tabungan</b> adalah uang yang disisihkan. Chat <b>nabung 1jt</b> masuk ke Tabungan, dan Tabungan tidak ditawarkan saat membayar kecuali disebut (<b>beli hp 3jt dari tabungan</b>). Matikan lewat tombol <b>Aktif</b> bila tidak dipakai.</p>';
     }
   });
+  // =============================================================
+  // MODE SALDO KELUARGA (1.0.29, Admin, perlu online)
+  // =============================================================
+  const rpTanda = (v) => (v < 0 ? '−' : '') + U.rp(v);
+  UI.Router.daftar('modeSaldo', {
+    izin: () => S.isAdmin(),
+    template() { return UI.header({ title: 'Mode Saldo Keluarga' }) + '<div class="page-body" data-body style="padding-bottom:40px"></div>'; },
+    init(el) {
+      el.addEventListener('click', (e) => {
+        const b = e.target.closest('[data-mode]');
+        if (!b || b.dataset.mode === S.modeSaldo()) return;
+        if (b.dataset.mode === 'MASING') bagiSaldo(); else gabungSaldo();
+      });
+    },
+    show(el) {
+      const m = S.modeSaldo();
+      const kartu = (v, ikon, judul, isi) => '<button class="card" data-mode="' + v + '" style="display:block;width:100%;text-align:left;margin-bottom:12px;border:2px solid ' + (m === v ? 'var(--primary)' : 'transparent') + '">' +
+        '<div class="row" style="gap:10px;align-items:center"><span class="ico-c sm">' + ic(ikon, 'ic-sm') + '</span><b class="grow" style="font-size:16px">' + judul + '</b>' + (m === v ? '<span class="badge b-green">Dipakai</span>' : '<span class="small" style="color:var(--primary);font-weight:600">Pilih</span>') + '</div>' +
+        '<p class="small muted" style="margin:8px 0 0;line-height:20px">' + isi + '</p></button>';
+      el.querySelector('[data-body]').innerHTML = (navigator.onLine === false ? '<div class="banner amber" style="margin-bottom:12px">' + ic('cloud-off') + '<span class="small">Mengganti mode saldo perlu koneksi internet.</span></div>' : '') +
+        kartu('BERSAMA', 'users', 'Saldo bersama', 'Semua anggota memakai saldo yang sama. Uang masuk dari siapa pun menambah saldo keluarga, pengeluaran siapa pun menguranginya. Kirim uang antar anggota tidak mengubah saldo.') +
+        kartu('MASING', 'user', 'Saldo masing-masing', 'Tiap anggota punya Tunai, Rekening Bank, E-Wallet, dan Tabungan sendiri. Bapak kirim ke Ibu: saldo Bapak berkurang, saldo Ibu bertambah. Admin bisa melihat saldo semua anggota, anggota lain hanya saldonya sendiri.') +
+        '<p class="help">Kirim uang ke anggota lewat chat, misalnya <b>transfer istri 100rb</b> atau <b>kasih anak 20rb</b>. Kiriman antar anggota bukan pengeluaran.</p>' +
+        '<p class="help">Ganti ke <b>masing-masing</b>: Admin membagi saldo keluarga ke tiap anggota. Ganti ke <b>bersama</b>: semua saldo anggota digabung jadi satu. Riwayat transaksi tetap ada.</p>';
+    }
+  });
+  async function siapOnline() {
+    if (!UI.perluOnline()) return false;
+    await g.Sync.sekarang();
+    if (S.jumlahAntre()) { UI.Toast.show('Masih ada catatan yang belum terkirim', 'warn', 'Tunggu sinkron selesai, lalu coba lagi.'); return false; }
+    return true;
+  }
+  async function gantiMode(data, btn) {
+    const res = await panggilOnline('modeSaldo', data, btn);
+    if (!res || !res.success) return false;
+    UI.Toast.show(data.mode === 'MASING' ? 'Saldo sekarang masing-masing' : 'Saldo keluarga digabung', 'success');
+    UI.Router.segarkan();
+    return true;
+  }
+  async function bagiSaldo() {
+    if (!(await siapOnline())) return;
+    const orang = S.anggotaAktif();
+    const dompet = S.saldoDompet().filter((x) => !x.dompet.pemilik && !S.dompetKlon(x.dompet));
+    const ada = dompet.filter((x) => x.saldo > 0), minus = dompet.filter((x) => x.saldo < 0);
+    const nol = dompet.filter((x) => !x.saldo);
+    const blok = ada.map((x, i) => '<div class="card" style="margin-bottom:12px" data-blok="' + i + '"><div class="row" style="justify-content:space-between;gap:8px"><b>' + U.esc((x.dompet.ikon || '') + ' ' + x.dompet.nama) + '</b><b class="num">' + U.rp(x.saldo) + '</b></div>' +
+      orang.map((a) => '<label class="row" style="gap:10px;margin-top:10px;align-items:center"><span class="grow small" style="font-weight:600">' + U.esc(a.nama) + (a.id === S.saya.id ? ' (Anda)' : '') + '</span><span class="input-wrap" style="width:150px"><span class="pre" style="font-size:13px">Rp</span><input class="input num" inputmode="numeric" data-isi="' + i + '" data-orang="' + U.esc(a.id) + '" value="' + (a.id === S.saya.id ? U.fmtInput(x.saldo) : '') + '" placeholder="0"></span></label>').join('') +
+      '<div class="small" style="margin-top:8px" data-sisa="' + i + '"></div></div>').join('');
+    const sh = UI.Sheet.open({ title: 'Bagi saldo keluarga', sub: 'Isi bagian tiap anggota. Sisa harus Rp0.', html:
+      (blok || '<p class="muted">Saldo semua dompet keluarga Rp0, jadi tidak ada yang perlu dibagi. Tiap anggota mulai dari Rp0.</p>') +
+      (minus.length ? '<p class="help">Dompet minus (' + minus.map((x) => U.esc(x.dompet.nama) + ' ' + rpTanda(x.saldo)).join(', ') + ') masuk ke saldo Anda.</p>' : '') +
+      (nol.length && blok ? '<p class="help">' + nol.map((x) => U.esc(x.dompet.nama)).join(', ') + ': Rp0, tidak perlu dibagi.</p>' : '') +
+      '<div class="sheet-foot"><button class="btn block lg" data-ok>Pakai saldo masing-masing</button></div>' });
+    const el = sh.el;
+    U.$$('[data-isi]', el).forEach((inp) => UI.inputRupiah(inp));
+    const hitung = () => {
+      let semua = true;
+      ada.forEach((x, i) => {
+        const dibagi = U.$$('[data-isi="' + i + '"]', el).reduce((a, inp) => a + U.angkaInput(inp.value), 0);
+        const sisa = x.saldo - dibagi;
+        if (sisa !== 0) semua = false;
+        el.querySelector('[data-sisa="' + i + '"]').innerHTML = sisa === 0 ? '<span style="color:var(--primary);font-weight:600">✔ Terbagi semua</span>'
+          : '<span style="color:var(--expense);font-weight:600">' + (sisa > 0 ? 'Sisa belum dibagi ' + U.rp(sisa) : 'Kelebihan ' + U.rp(-sisa)) + '</span>';
+      });
+      el.querySelector('[data-ok]').disabled = !semua;
+      return semua;
+    };
+    el.addEventListener('input', hitung);
+    hitung();
+    el.querySelector('[data-ok]').onclick = async (e) => {
+      if (!hitung()) return;
+      const bagi = {};
+      ada.forEach((x, i) => { bagi[x.dompet.id_dompet] = {}; U.$$('[data-isi="' + i + '"]', el).forEach((inp) => { bagi[x.dompet.id_dompet][inp.dataset.orang] = U.angkaInput(inp.value); }); });
+      minus.forEach((x) => { bagi[x.dompet.id_dompet] = { [S.saya.id]: x.saldo }; });
+      if (await gantiMode({ mode: 'MASING', bagi }, e.currentTarget)) sh.close();
+    };
+  }
+  async function gabungSaldo() {
+    if (!(await siapOnline())) return;
+    const per = S.saldoDompet().filter((x) => S.dompetKlon(x.dompet));
+    const orang = Array.from(new Set(per.map((x) => x.dompet.pemilik)));
+    const isi = orang.map((id) => { const v = per.filter((x) => x.dompet.pemilik === id).reduce((a, x) => a + x.saldo, 0); return '<div class="row" style="justify-content:space-between;padding:4px 0"><span>' + U.esc(S.orang(id).nama) + '</span><b class="num">' + rpTanda(v) + '</b></div>'; }).join('');
+    const total = per.reduce((a, x) => a + x.saldo, 0);
+    const ok = await UI.Sheet.konfirmasi({ judul: 'Gabung jadi saldo bersama?', isiHtml: 'Semua saldo anggota digabung menjadi satu saldo keluarga:' +
+      '<div style="margin:10px 0;color:var(--text)">' + isi + '<div class="row" style="justify-content:space-between;padding:6px 0 0;border-top:1px solid var(--line);margin-top:6px"><b>Total</b><b class="num">' + rpTanda(total) + '</b></div></div>Riwayat transaksi tetap ada.', ok: 'Gabungkan' });
+    if (ok) await gantiMode({ mode: 'BERSAMA' });
+  }
+
   function ubahDompet(id) {
     const d = id ? S.dompet(id) : { nama: '', tipe: 'EWALLET', pemilik: '', saldo_awal: 0, tanggal_saldo_awal: U.hariIni(), alias: '', aktif: true, ikon: '' };
     const st = Object.assign({}, d);
@@ -599,7 +690,7 @@
     }
   });
   function ubahAnggota(id) {
-    const a = id ? S.orang(id) : { nama: '', username: '', peran: 'ANAK', izin_lihat: 'SENDIRI', id_dompet_default: (S.dompetAktif()[0] || {}).id_dompet || '', aktif: true };
+    const a = id ? S.orang(id) : { nama: '', username: '', peran: 'ANAK', izin_lihat: 'SENDIRI', id_dompet_default: (dasarDompet()[0] || {}).id_dompet || '', aktif: true };
     const st = Object.assign({}, a);
     const sh = UI.Sheet.open({ title: id ? 'Ubah Anggota' : 'Tambah Anggota', html:
       '<label class="field"><span class="lbl">Nama tampilan</span><input class="input" data-nama maxlength="30" value="' + U.esc(st.nama) + '" placeholder="Contoh: Adik"></label>' +

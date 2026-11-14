@@ -88,6 +88,12 @@
   S.dompet = (id) => S.peta().dompet[id] || null;
   S.orang = (id) => S.peta().orang[id] || { id, nama: 'Anggota', warna: '#64748B', peran: 'DEWASA' };
   S.namaDompet = (id) => { const d = S.dompet(id); return d ? d.nama : '—'; };
+  /** Nama dompet + pemiliknya bila milik anggota lain (mode saldo masing-masing): "Rekening Bank Vicky" */
+  S.namaDompetLengkap = (id) => {
+    const d = S.dompet(id);
+    if (!d) return '—';
+    return d.pemilik && S.saya && d.pemilik !== S.saya.id && (S.modeSaldo() === 'MASING' || S.dompetKlon(d)) ? d.nama + ' ' + S.orang(d.pemilik).nama : d.nama;
+  };
 
   // ---------- Hak akses ----------
   S.isAdmin = () => !!S.saya && S.saya.peran === 'ADMIN';
@@ -97,17 +103,37 @@
   S.fiturDompet = () => String(S.master.pengaturan.fitur_dompet || 'ON') === 'ON';
   /** 1.0.21: saat fitur dompet nonaktif, transaksi tetap dicatat ke dompet utama (Tunai/Rekening/E-wallet digabung jadi "Uang"); Tabungan tetap terpisah */
   S.dompetUtama = function () {
-    const xs = S.master.dompet.filter((d) => d.aktif !== false && d.tipe !== 'TABUNGAN');
-    return (S.saya && xs.find((d) => d.id_dompet === S.saya.id_dompet_default)) || xs.find((d) => d.tipe === 'TUNAI') || xs[0] || null;
+    const xs = S.dompetAktif().filter((d) => d.tipe !== 'TABUNGAN');
+    const def = S.saya && S.petakanDompet(S.saya.id_dompet_default);
+    return (def && xs.find((d) => d.id_dompet === def)) || xs.find((d) => d.tipe === 'TUNAI') || xs[0] || null;
+  };
+  // ---------- 1.0.29: mode saldo keluarga ----------
+  /** BERSAMA = semua anggota memakai dompet keluarga yang sama; MASING = tiap anggota punya salinan dompet sendiri */
+  S.modeSaldo = () => (String((S.master.pengaturan || {}).mode_saldo || 'BERSAMA').toUpperCase() === 'MASING' ? 'MASING' : 'BERSAMA');
+  S.dompetKlon = (d) => !!d && String(d.id_dompet).indexOf('~') > -1;
+  /** Dompet keluarga → salinannya milik saya (mode masing-masing); selain itu tetap */
+  S.petakanDompet = function (id) {
+    if (!id || id === 'TANYA' || S.modeSaldo() !== 'MASING' || !S.saya) return id;
+    const d = S.dompet(id);
+    if (d && d.pemilik) return id;
+    const k = S.dompet(String(id).split('~')[0] + '~' + S.saya.id);
+    return k && k.aktif !== false ? k.id_dompet : id;
+  };
+  /** Dompet yang boleh dilihat saldonya. Mode masing-masing: Admin melihat dompet semua anggota, anggota lain hanya miliknya. */
+  S.dompetTerlihat = function () {
+    if (S.modeSaldo() !== 'MASING') return S.dompetAktif();
+    return S.master.dompet.filter((d) => d.aktif !== false && !!d.pemilik && (S.isAdmin() || (S.saya && d.pemilik === S.saya.id)));
   };
   S.namaKeluarga = () => 'Keluarga';                 // tampilan cukup "Keluarga", tanpa nama keluarga
   /** Judul transaksi untuk tampilan: pindah saldo dari nabung ditampilkan sebagai "Nabung" */
   S.judulTx = (t) => t.jenis === 'SALDO' ? 'Penyesuaian saldo' : t.jenis !== 'PINDAH' ? t.keterangan
     : /\b(me)?nabung\b/i.test(t.keterangan || '') ? 'Nabung'
+    : /^(kirim ke .+|pembagian saldo|gabung saldo)$/i.test(t.keterangan || '') ? U.huruf1(t.keterangan)
     : /^(tarik tunai|ambil tabungan|setor tunai|top up .+)$/i.test(t.keterangan || '') ? U.huruf1(t.keterangan) : 'Pindah saldo';
   S.kelasJenis = (j) => (j === 'MASUK' ? 't-in' : j === 'KELUAR' ? 't-out' : 't-tr');
-  S.ikonTx = (t) => t.jenis === 'SALDO' ? '\u2696\ufe0f' : t.jenis === 'PINDAH' ? (S.judulTx(t) === 'Nabung' ? '\ud83d\udcb0' : '\ud83d\udd04') : S.kat(t.id_kategori).ikon;
-  S.dompetAktif = () => S.master.dompet.filter((d) => d.aktif !== false);
+  S.ikonTx = (t) => t.jenis === 'SALDO' ? '\u2696\ufe0f' : t.jenis === 'PINDAH' ? (S.judulTx(t) === 'Nabung' ? '\ud83d\udcb0' : /^kirim ke /i.test(t.keterangan || '') ? '\ud83e\udd1d' : '\ud83d\udd04') : S.kat(t.id_kategori).ikon;
+  /** Dompet yang dipakai saat mencatat. Bersama: dompet keluarga (bukan salinan). Masing-masing: dompet milik saya. */
+  S.dompetAktif = () => S.master.dompet.filter((d) => d.aktif !== false && (S.modeSaldo() === 'MASING' ? !!d.pemilik && !!S.saya && d.pemilik === S.saya.id : !S.dompetKlon(d)));
   S.anggotaAktif = () => S.master.anggota.filter((a) => a.aktif !== false);
   S.kategoriAktif = (jenis) => S.master.kategori.filter((k) => k.aktif !== false && (!jenis || k.jenis === jenis)).sort((a, b) => (a.urutan || 0) - (b.urutan || 0));
   S.kategoriDefault = (jenis) => {
@@ -119,9 +145,11 @@
   // ---------- Konteks untuk pembaca chat ----------
   S.ctxParser = function () {
     return {
-      versi: S.meta.verMaster + ':' + S.master.kamus.length + ':' + S.master.kategori.length + ':' + S.master.dompet.length + ':' + (S.master.typo || []).length,
+      versi: S.meta.verMaster + ':' + S.modeSaldo() + ':' + S.master.kamus.length + ':' + S.master.kategori.length + ':' + S.master.dompet.length + ':' + (S.master.typo || []).length,
       kategori: S.master.kategori, kamus: S.master.kamus, dompet: S.dompetAktif(), anggota: S.master.anggota,
-      saya: S.saya, fiturDompet: S.fiturDompet(), dompetUtama: (S.dompetUtama() || {}).id_dompet || '', hariIni: U.hariIni(),
+      saya: S.saya && S.modeSaldo() === 'MASING' ? Object.assign({}, S.saya, { id_dompet_default: S.petakanDompet(S.saya.id_dompet_default) }) : S.saya,
+      fiturDompet: S.fiturDompet(), dompetUtama: (S.dompetUtama() || {}).id_dompet || '', hariIni: U.hariIni(),
+      modeSaldo: S.modeSaldo(), dompetSemua: S.master.dompet.filter((d) => d.aktif !== false),
       kategoriDefaultKeluar: S.kategoriDefault('KELUAR'), kategoriDefaultMasuk: S.kategoriDefault('MASUK'),
       riwayat: S.riwayatKata,
       typo: S.master.typo || [], aturan: S.master.aturan || {}, ingatan: S.ingatanSaya(), aliasCatatan: S.master.alias || [], pemicu: (S.master.penasihat || {}).pemicu || []
@@ -412,7 +440,7 @@
   S.saldoDompet = function () {
     const mulaiJendela = S.meta.jendelaMulai || '0000-00-00';
     const basis = S.meta.basisSaldo || {};
-    return S.dompetAktif().map((d) => {
+    return S.dompetTerlihat().map((d) => {
       const batas = d.tanggal_saldo_awal && d.tanggal_saldo_awal > mulaiJendela ? d.tanggal_saldo_awal : mulaiJendela;
       let s = (Number(d.saldo_awal) || 0) + (Number(basis[d.id_dompet]) || 0);
       S.tx.forEach((t) => {
