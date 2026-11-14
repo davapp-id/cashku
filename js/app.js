@@ -83,7 +83,6 @@
       if (kodeUrl) { el.querySelector('[data-form]').kode.value = kodeUrl; el.querySelector('[data-hubung]').click(); }
       const bp = el.querySelector('[data-pasang]');
       if (bp) { bp.hidden = sudahAplikasi(); if (bp.previousElementSibling) bp.previousElementSibling.hidden = sudahAplikasi(); }
-      el.querySelector('[data-cfg]').innerHTML = g.API.urlTerisi() ? '' : '<div class="banner amber" style="margin-bottom:16px">' + ic('triangle-alert') + '<span class="small">Alamat server belum diisi. Buka berkas <b>js/config.js</b> dan tempel URL Web App (/exec) dari Apps Script.</span></div>';
     }
   });
   const errHtml = (m) => '<div class="err-msg">' + ic('circle-alert', 'ic-sm') + U.esc(m) + '</div>';
@@ -92,6 +91,8 @@
     const perluKode = g.API.modeKode() && !g.API.Server.url();
     el.querySelector('[data-kodeform]').hidden = !perluKode;
     el.querySelector('[data-akun]').hidden = perluKode;
+    // peringatan config hanya untuk cara lama (satu keluarga); dihitung ulang setiap kali, termasuk setelah kode tersambung
+    el.querySelector('[data-cfg]').innerHTML = g.API.urlTerisi() || g.API.modeKode() ? '' : '<div class="banner amber" style="margin-bottom:16px">' + ic('triangle-alert') + '<span class="small">Alamat server belum diisi. Buka berkas <b>js/config.js</b> dan tempel URL Web App (/exec) dari Apps Script.</span></div>';
     const inf = g.API.modeKode() && g.API.Server.info();
     el.querySelector('[data-kodeinfo]').innerHTML = inf ? '<div class="banner" style="margin:4px 0 8px;display:flex;align-items:center;gap:8px">' + ic('users') +
       '<span class="small" style="flex:1"><b>' + U.esc(inf.nama ? 'Keluarga ' + inf.nama : 'CashKu keluarga') + '</b><br>' + U.esc(inf.kode) + '</span><button type="button" class="link small" data-gantikode>Ganti kode</button></div>' : '';
