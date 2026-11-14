@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#008069">
+  <meta name="robots" content="noindex">
+  <title>CashKu Penjual</title>
+  <link rel="icon" href="icons/favicon-64.png">
+  <link rel="stylesheet" href="jual/jual.css">
+  <script src="js/config.js"></script>
+</head>
+<body>
+<main class="wadah">
+  <div class="kepala"><img src="icons/icon-192.png" alt=""><div><b>CashKu Penjual</b><small>Kode Aktivasi &amp; daftar pembeli</small></div></div>
+
+  <!-- Masuk -->
+  <section class="kartu tersembunyi" data-masuk>
+    <h1>Masuk</h1>
+    <p class="kecil">Halaman ini hanya untuk penjual CashKu.</p>
+    <label for="pw">Password penjual</label>
+    <input id="pw" type="password" autocomplete="current-password">
+    <button class="tombol" data-aksi="masuk">Masuk</button>
+    <div class="pesan" data-pesan-masuk></div>
+  </section>
+
+  <!-- Utama -->
+  <div class="tersembunyi" data-utama>
+    <div class="ringkas">
+      <div><b data-n-total>0</b><small>Pembeli</small></div>
+      <div><b data-n-pasang>0</b><small>Terpasang</small></div>
+      <div><b data-n-baru>0</b><small>Belum dipasang</small></div>
+    </div>
+    <div class="kartu">
+      <div style="display:flex;justify-content:space-between;align-items:baseline"><b>Kuota Google</b><span class="kecil" data-kuota-teks></span></div>
+      <div class="meter" data-meter><i style="width:0"></i></div>
+      <p class="kecil" data-kuota-saran></p>
+    </div>
+
+    <section class="kartu">
+      <h2>Buat kode baru</h2>
+      <label for="b-nama">Nama pembeli</label><input id="b-nama" maxlength="60" placeholder="contoh: Budi Santoso">
+      <label for="b-wa">Nomor WhatsApp</label><input id="b-wa" inputmode="tel" maxlength="20" placeholder="08xxxxxxxxxx">
+      <label for="b-cat">Catatan (opsional)</label><input id="b-cat" maxlength="200" placeholder="contoh: lunas via transfer, 12 Nov">
+      <button class="tombol" data-aksi="buat">Buat kode</button>
+      <div class="pesan" data-pesan-buat></div>
+      <div class="tersembunyi" data-hasil>
+        <p style="margin-top:14px">Kode untuk <b data-hasil-nama></b>:</p>
+        <div class="kodebesar" data-hasil-kode></div>
+        <div class="baris-tombol"><a class="tombol" data-hasil-wa target="_blank" rel="noopener">Kirim lewat WhatsApp</a><button class="tombol garis" data-aksi="salinHasil">Salin pesan</button></div>
+      </div>
+    </section>
+
+    <section class="kartu">
+      <div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0">Daftar pembeli</h2><button class="tombol garis kecil" data-aksi="muat">Segarkan</button></div>
+      <input class="cari" style="margin-top:12px" data-cari placeholder="Cari nama, kode, atau email…">
+      <div data-daftar><p class="kecil">Memuat…</p></div>
+    </section>
+
+    <section class="kartu">
+      <h2>Ganti password penjual</h2>
+      <label for="pl">Password lama</label><input id="pl" type="password" autocomplete="current-password">
+      <label for="pb">Password baru (minimal 8)</label><input id="pb" type="password" autocomplete="new-password">
+      <button class="tombol garis" data-aksi="gantiPw">Ganti password</button>
+      <div class="pesan" data-pesan-pw></div>
+    </section>
+    <button class="tombol garis" data-aksi="keluar">Keluar</button>
+  </div>
+  <div class="kaki"><a href="privasi.html">Kebijakan privasi</a></div>
+</main>
+<script src="jual/umum.js"></script>
+<script src="jual/penjual.js"></script>
+</body>
+</html>

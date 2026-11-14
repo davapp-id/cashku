@@ -1,0 +1,84 @@
+/* CashKu — gaya halaman jualan: pemasang, penjual, kebijakan privasi (terang, ramah HP) */
+@font-face { font-family: 'Plus Jakarta Sans'; src: url('../fonts/pjs-400.woff2') format('woff2'); font-weight: 400; font-display: swap; }
+@font-face { font-family: 'Plus Jakarta Sans'; src: url('../fonts/pjs-600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
+@font-face { font-family: 'Plus Jakarta Sans'; src: url('../fonts/pjs-700.woff2') format('woff2'); font-weight: 700; font-display: swap; }
+:root {
+  --hijau: #1FA855; --hijau-tua: #008069; --hijau-muda: #E7F6EE; --tinta: #10201B; --abu: #5F6B66; --garis: #E1E8E4;
+  --latar: #F3F8F5; --kartu: #FFFFFF; --merah: #C5221F; --merah-muda: #FCE8E6; --kuning-muda: #FEF3C7; --kuning: #92400E; --biru: #0B57D0;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; min-height: 100vh; background: var(--latar); color: var(--tinta); font: 15px/1.5 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif; }
+a { color: var(--biru); }
+.wadah { max-width: 520px; margin: 0 auto; padding: 18px 16px 48px; }
+.kepala { display: flex; align-items: center; gap: 12px; padding: 6px 0 14px; }
+.kepala img { width: 48px; height: 48px; border-radius: 14px; }
+.kepala b { display: block; font-size: 20px; line-height: 1.2; }
+.kepala small { color: var(--abu); font-weight: 600; font-size: 12.5px; }
+.tahap { display: flex; gap: 6px; margin: 4px 0 14px; }
+.tahap i { flex: 1; height: 5px; border-radius: 3px; background: var(--garis); }
+.tahap i.on { background: var(--hijau); }
+.kartu { background: var(--kartu); border-radius: 18px; padding: 20px 18px; box-shadow: 0 2px 10px rgba(16, 32, 27, .06); margin-bottom: 14px; }
+h1 { font-size: 21px; line-height: 1.25; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 6px; }
+p { margin: 6px 0; color: #34413C; }
+.kecil { font-size: 13px; color: var(--abu); }
+label { display: block; font-size: 13px; font-weight: 700; color: var(--abu); margin: 14px 0 6px; }
+input, textarea, select { width: 100%; font: inherit; font-weight: 600; font-size: 16px; padding: 12px 14px; border-radius: 12px; border: 1.5px solid #C9D3CF; background: #fff; color: var(--tinta); outline: none; }
+input:focus, textarea:focus { border-color: var(--hijau); box-shadow: 0 0 0 3px rgba(31, 168, 85, .18); }
+input.kode { text-transform: uppercase; letter-spacing: 1.5px; font-family: ui-monospace, Menlo, monospace; font-weight: 800; }
+.tombol { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; margin-top: 16px; padding: 10px 18px; border: 0; border-radius: 24px;
+  background: var(--hijau); color: #fff; font: 800 15.5px 'Plus Jakarta Sans', system-ui, sans-serif; text-decoration: none; cursor: pointer; }
+.tombol:active { transform: scale(.98); }
+.tombol[disabled] { opacity: .55; pointer-events: none; }
+.tombol.biru { background: var(--biru); }
+.tombol.garis { background: #fff; color: var(--tinta); border: 1.5px solid #C9D3CF; }
+.tombol.kecil { min-height: 38px; margin-top: 8px; font-size: 13.5px; width: auto; padding: 6px 14px; }
+.baris-tombol { display: flex; gap: 10px; flex-wrap: wrap; }
+.baris-tombol .tombol { flex: 1; }
+.pesan { margin-top: 12px; padding: 11px 13px; border-radius: 12px; font-size: 14px; font-weight: 600; }
+.pesan.galat { background: var(--merah-muda); color: var(--merah); }
+.pesan.info { background: var(--hijau-muda); color: #0E5F33; }
+.pesan.peringatan { background: var(--kuning-muda); color: var(--kuning); }
+.pesan:empty { display: none; }
+.cek { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-weight: 700; font-size: 14.5px; }
+.cek .ic { width: 24px; height: 24px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 900; background: #EDF1EF; color: #fff; }
+.cek.jalan .ic { background: transparent; border: 3px solid #CFE9DA; border-top-color: var(--hijau); animation: putar .8s linear infinite; }
+.cek.selesai .ic { background: var(--hijau); }
+.cek.gagal .ic { background: var(--merah); }
+@keyframes putar { to { transform: rotate(360deg); } }
+.langkah-isi { display: none; }
+.langkah-isi.on { display: block; animation: masuk .25s ease-out; }
+@keyframes masuk { from { opacity: 0; transform: translateY(8px); } }
+.kodebesar { display: inline-block; margin: 6px 0; padding: 6px 12px; border-radius: 10px; background: var(--hijau-muda); color: #0E5F33; font: 800 20px ui-monospace, Menlo, monospace; letter-spacing: 1.5px; }
+ol.petunjuk { padding-left: 20px; margin: 8px 0; }
+ol.petunjuk li { margin: 6px 0; }
+.gambar-sakelar { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--garis); border-radius: 14px; margin: 12px 0; }
+.gambar-sakelar b { flex: 1; font-size: 14px; }
+.sakelar { width: 44px; height: 24px; border-radius: 12px; background: var(--hijau); position: relative; flex: none; }
+.sakelar::after { content: ''; position: absolute; right: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; }
+.kaki { text-align: center; margin-top: 18px; font-size: 12.5px; color: var(--abu); }
+.kaki a { color: var(--abu); }
+/* penjual */
+.ringkas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.ringkas div { background: #fff; border-radius: 14px; padding: 10px 12px; box-shadow: 0 2px 10px rgba(16, 32, 27, .05); }
+.ringkas b { display: block; font-size: 20px; }
+.ringkas small { color: var(--abu); font-weight: 600; font-size: 12px; }
+.meter { height: 8px; border-radius: 4px; background: var(--garis); overflow: hidden; margin-top: 6px; }
+.meter i { display: block; height: 100%; background: var(--hijau); }
+.meter.awas i { background: #E08A00; }
+.pembeli { border-top: 1px solid var(--garis); padding: 12px 0; }
+.pembeli:first-child { border-top: 0; }
+.pembeli .atas { display: flex; align-items: center; gap: 8px; }
+.pembeli .atas b { flex: 1; }
+.lencana { font-size: 11.5px; font-weight: 800; padding: 3px 9px; border-radius: 999px; }
+.lencana.BARU { background: #FEF3C7; color: #92400E; }
+.lencana.TERPASANG { background: var(--hijau-muda); color: #0E5F33; }
+.lencana.NONAKTIF { background: var(--merah-muda); color: var(--merah); }
+.pembeli .kodekecil { font: 700 13.5px ui-monospace, Menlo, monospace; letter-spacing: .5px; }
+.pembeli .rinci { font-size: 12.5px; color: var(--abu); margin-top: 2px; }
+.cari { margin-bottom: 8px; }
+.tersembunyi { display: none !important; }
+.dok h2 { margin-top: 18px; }
+.dok li { margin: 4px 0; }

@@ -1,0 +1,269 @@
+/* CashKu — awal aplikasi: login, sesi, PWA (pasang & pembaruan), keluar */
+(function (g) {
+  'use strict';
+  const S = g.S, U = g.U, UI = g.UI, ic = g.ic;
+  let promptPasang = null;
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const terpasang = () => (g.matchMedia && g.matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  // Sudah berupa aplikasi (APK Android atau PWA yang dibuka dari ikon) → tombol "Pasang CashKu di HP" tidak ditampilkan
+  const sudahAplikasi = () => terpasang() || !!(g.Capacitor && g.Capacitor.isNativePlatform && g.Capacitor.isNativePlatform());
+
+  // =============================================================
+  // LOGIN
+  // =============================================================
+  UI.Router.daftar('login', {
+    auth: false,
+    template() {
+      return '<div class="login"><div class="login-top"><div class="login-logo">' + UI.LOGO_BESAR + '</div><h1>CashKu</h1><p>Catat keuangan keluarga semudah chatting</p></div>' +
+        '<form class="login-sheet" data-form novalidate><div class="handle" style="width:36px;height:4px;border-radius:99px;background:var(--line-2);margin:0 auto"></div>' +
+        // 1.0.25 (mode jual): HP yang belum tersambung diminta Kode Aktivasi dulu
+        '<div data-kodeform hidden><h2>Sambungkan CashKu</h2><p class="muted">Masukkan Kode Aktivasi keluarga Anda (dari penjual CashKu atau dari Admin keluarga).</p>' +
+        '<label class="field"><span class="lbl">Kode Aktivasi</span><div class="input-wrap">' + ic('key') + '<input class="input" name="kode" placeholder="CK-XXXX-XXXX" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="14" style="text-transform:uppercase;letter-spacing:1px"></div><div data-errkode></div></label>' +
+        '<button type="button" class="btn block lg" style="margin-top:24px" data-hubung>Sambungkan</button></div>' +
+        '<div data-akun><h2>Masuk</h2><p class="muted">Gunakan akun yang dibuat Admin keluarga</p><div data-cfg></div><div data-kodeinfo></div>' +
+        '<label class="field"><span class="lbl">Username</span><div class="input-wrap">' + ic('user') + '<input class="input" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></div></label>' +
+        '<label class="field"><span class="lbl">Password</span><div class="input-wrap">' + ic('lock') + '<input class="input has-end" name="password" type="password" autocomplete="current-password" required><button type="button" class="end" data-eye aria-label="Tampilkan password">' + ic('eye') + '</button></div><div data-err></div></label>' +
+        '<button class="btn block lg" style="margin-top:24px" data-masuk>Masuk</button>' +
+        '<p class="muted small" style="text-align:center;margin:16px 0 0">Lupa password? <span class="link">Hubungi Admin keluarga</span></p></div>' +
+        (sudahAplikasi() ? '' : '<div class="hr" style="margin:24px 0"></div><button type="button" class="btn block soft" data-pasang>' + ic('download') + 'Pasang CashKu di HP</button>') +
+        '<div class="ver">CashKu v' + U.esc(U.VERSI) + '</div></form></div>';
+    },
+    init(el) {
+      const f = el.querySelector('[data-form]');
+      el.querySelector('[data-eye]').onclick = () => { const p = f.password; p.type = p.type === 'password' ? 'text' : 'password'; el.querySelector('[data-eye]').innerHTML = ic(p.type === 'password' ? 'eye' : 'eye-off'); };
+      const bp = el.querySelector('[data-pasang]'); if (bp) bp.onclick = () => App.pasang();
+      // --- Kode Aktivasi ---
+      const hubung = async () => {
+        const btn = el.querySelector('[data-hubung]'), e2 = el.querySelector('[data-errkode]');
+        e2.innerHTML = '';
+        UI.tombolSibuk(btn, true, 'Memeriksa kode…');
+        const r = await g.API.hubungkanKode(f.kode.value);
+        UI.tombolSibuk(btn, false);
+        if (!r.success) { e2.innerHTML = errHtml(r.message || 'Kode tidak bisa dipakai.'); return; }
+        f.kode.value = '';
+        tampilKode(el);
+        setTimeout(() => f.username.focus(), 50);
+      };
+      el.querySelector('[data-hubung]').onclick = hubung;
+      f.kode.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); hubung(); } });
+      el.addEventListener('click', async (e) => {
+        if (!e.target.closest('[data-gantikode]')) return;
+        const ok = await UI.Sheet.konfirmasi({ judul: 'Ganti Kode Aktivasi?', isi: 'HP ini akan disambungkan ke CashKu keluarga lain. Data yang tersimpan di HP ini dihapus (data di server tetap aman).', ok: 'Ganti kode' });
+        if (!ok) return;
+        await S.keluar(); await g.API.Server.lupakan();
+        tampilKode(el);
+      });
+      f.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const err = el.querySelector('[data-err]'); err.innerHTML = '';
+        const username = f.username.value.trim(), password = f.password.value;
+        if (!username || !password) { err.innerHTML = errHtml('Username dan password wajib diisi.'); return; }
+        if (navigator.onLine === false) { err.innerHTML = errHtml('Masuk pertama kali perlu koneksi internet.'); return; }
+        const btn = el.querySelector('[data-masuk]');
+        UI.tombolSibuk(btn, true, 'Masuk…');
+        const res = await g.API.api('login', { username, password }, { token: '', tries: 2 });
+        if (!res.success) {
+          UI.tombolSibuk(btn, false);
+          f.password.classList.toggle('err', res.data && res.data.code === 'WRONG');
+          err.innerHTML = errHtml(res.message || 'Gagal masuk.');
+          return;
+        }
+        await S.terapkanBoot(res.data.token, res.data.boot);
+        UI.tombolSibuk(btn, false);
+        f.reset();
+        await App.mulaiSesi();
+        UI.Router.go('chat', null, { ganti: true });
+      });
+      f.password.addEventListener('input', () => f.password.classList.remove('err'));
+    },
+    show(el) {
+      tampilKode(el);
+      // link dari pemasang: index.html?kode=CK-XXXX-XXXX → langsung disambungkan
+      const kodeUrl = g.API.modeKode() && !g.API.Server.url() && g.API.rapikanKode(new URLSearchParams(location.search).get('kode'));
+      if (kodeUrl) { el.querySelector('[data-form]').kode.value = kodeUrl; el.querySelector('[data-hubung]').click(); }
+      const bp = el.querySelector('[data-pasang]');
+      if (bp) { bp.hidden = sudahAplikasi(); if (bp.previousElementSibling) bp.previousElementSibling.hidden = sudahAplikasi(); }
+      el.querySelector('[data-cfg]').innerHTML = g.API.urlTerisi() ? '' : '<div class="banner amber" style="margin-bottom:16px">' + ic('triangle-alert') + '<span class="small">Alamat server belum diisi. Buka berkas <b>js/config.js</b> dan tempel URL Web App (/exec) dari Apps Script.</span></div>';
+    }
+  });
+  const errHtml = (m) => '<div class="err-msg">' + ic('circle-alert', 'ic-sm') + U.esc(m) + '</div>';
+  /** Mode jual: tampilkan isian kode bila HP belum tersambung, atau info keluarga + "Ganti kode" bila sudah */
+  function tampilKode(el) {
+    const perluKode = g.API.modeKode() && !g.API.Server.url();
+    el.querySelector('[data-kodeform]').hidden = !perluKode;
+    el.querySelector('[data-akun]').hidden = perluKode;
+    const inf = g.API.modeKode() && g.API.Server.info();
+    el.querySelector('[data-kodeinfo]').innerHTML = inf ? '<div class="banner" style="margin:4px 0 8px;display:flex;align-items:center;gap:8px">' + ic('users') +
+      '<span class="small" style="flex:1"><b>' + U.esc(inf.nama ? 'Keluarga ' + inf.nama : 'CashKu keluarga') + '</b><br>' + U.esc(inf.kode) + '</span><button type="button" class="link small" data-gantikode>Ganti kode</button></div>' : '';
+  }
+
+  // =============================================================
+  // APP
+  // =============================================================
+  const App = {
+    async boot() {
+      UI.Router.root = document.getElementById('app');
+      UI.Tema.terapkan();
+      let ada = false;
+      try { ada = await S.muat(); } catch (e) { console.error(e); }
+      // Pindah ke CashKu versi jual (APK baru dipasang di atas yang lama): sesi lama tanpa Kode Aktivasi tidak bisa dipakai lagi
+      if (ada && g.API.modeKode() && !g.API.Server.url()) { await S.keluar(); ada = false; }
+      g.API.Server.sinkronKv();
+      UI.Tema.terapkan();
+      const segarkan = U.debounce(() => UI.Router.segarkan(), 150);
+      S.on('tx', segarkan);
+      S.on('master', () => { UI.Tema.terapkan(); segarkan(); });
+      // Status sinkron hanya memengaruhi halaman yang menampilkannya
+      S.on('sync', (st) => { if ((st === 'ok' || st === 'offline') && ['dashboard', 'pengaturan', 'laporan'].indexOf(UI.Router.saatIni) > -1) segarkan(); });
+      addEventListener('hashchange', UI.Router.route);
+      document.getElementById('app').innerHTML = '';
+      if (ada) await App.mulaiSesi();
+      UI.Router.route();
+      if (g.Asli && g.Asli.aktif()) g.Asli.sehat(); else App.daftarSW();
+      // Beri tahu sekali setelah CashKu diperbarui otomatis
+      try {
+        const lama = localStorage.getItem('cashku_versi_terakhir');
+        localStorage.setItem('cashku_versi_terakhir', U.VERSI);
+        if (lama && lama !== U.VERSI && S.saya) setTimeout(() => UI.Toast.show('CashKu diperbarui ke v' + U.VERSI + ' ✨', 'success'), 900);
+      } catch (e) { /* abaikan */ }
+    },
+    /** Pembaruan otomatis hanya dipakai bila tidak ada yang sedang diketik/diisi (teks & isian tidak hilang) */
+    bolehMuatUlang() {
+      if (document.querySelector('.sheet')) return false;
+      if (UI.memilihFile || (g.Chat && g.Chat.Latar && g.Chat.Latar.sibuk)) return false;   // sedang memilih/memproses gambar
+      if (g.Atur && g.Atur.aktif && g.Atur.aktif()) return false;
+      if (g.Penasihat && g.Penasihat.aktif && g.Penasihat.aktif()) return false;
+      const isian = document.querySelectorAll('#app input, #app textarea');
+      for (let i = 0; i < isian.length; i++) {
+        const el = isian[i], tp = String(el.type || '').toLowerCase();
+        if (['checkbox', 'radio', 'color', 'file', 'hidden', 'button', 'submit', 'range'].indexOf(tp) > -1 || el.closest('[hidden]')) continue;
+        if (el.value !== el.defaultValue) return false;
+      }
+      return true;
+    },
+    async mulaiSesi() {
+      g.Sync.mulai();
+      g.API.pemanasan();
+      g.DB.mintaPermanen();
+      UI.Tema.terapkan();
+      g.Sync.jadwal(200);
+      // APK Android: alarm asli; web/iPhone: alarm di layar + notifikasi PWA
+      if (g.Asli && g.Asli.aktif()) g.Asli.mulai(); else if (g.Pengingat) g.Pengingat.Alarm.mulai();
+      const ruang = await g.DB.perkiraanRuang();
+      if (ruang && ruang.quota && ruang.usage / ruang.quota > 0.9) UI.Toast.show('Penyimpanan HP hampir penuh', 'warn', 'Segera online agar data terkirim.');
+      if (S.outbox.size > 500) UI.Toast.show(S.outbox.size + ' perubahan belum terkirim', 'warn', 'Segera sambungkan ke internet.');
+      if (g.DB.pakaiMemori()) UI.Toast.show('Mode penyimpanan sementara', 'warn', 'Browser ini tidak mengizinkan penyimpanan offline (mode privat?).');
+      if (!g.API.urlTerisi()) UI.Toast.show('Alamat server belum diisi', 'error', 'Buka js/config.js lalu tempel URL /exec dari Apps Script. Sampai itu diisi, catatan hanya tersimpan di HP ini.', 15000);
+    },
+
+    /** Token kedaluwarsa/dicabut: data di HP tetap aman, minta masuk lagi dengan akun yang sama */
+    sesiBerakhir() {
+      if (App._minta || !S.saya) return;
+      App._minta = true;
+      const sh = UI.Sheet.open({ title: 'Masuk lagi', sub: 'Sesi berakhir. Catatan yang belum terkirim tetap aman di HP.', html:
+        '<label class="field"><span class="lbl">Username</span><input class="input" value="' + U.esc(S.saya.username || '') + '" disabled></label>' +
+        '<label class="field"><span class="lbl">Password</span><input class="input" type="password" data-pw autocomplete="current-password"></label><div data-err></div>' +
+        '<div class="sheet-foot"><button class="btn block lg" data-ok>Masuk</button><button class="btn block ghost" data-out>Keluar dari akun ini</button></div>',
+        onClose: () => { App._minta = false; } });
+      sh.el.querySelector('[data-out]').onclick = () => { sh.close(); App.keluar(true); };
+      sh.el.querySelector('[data-ok]').onclick = async (e) => {
+        UI.tombolSibuk(e.currentTarget, true);
+        const res = await g.API.api('login', { username: S.saya.username, password: sh.el.querySelector('[data-pw]').value }, { token: '' });
+        UI.tombolSibuk(e.currentTarget, false);
+        if (!res.success) { sh.el.querySelector('[data-err]').innerHTML = errHtml(res.message); return; }
+        await S.terapkanBoot(res.data.token, res.data.boot);
+        sh.close(); UI.Router.segarkan(); g.Sync.sekarang();
+        UI.Toast.show('Berhasil masuk lagi', 'success');
+      };
+    },
+
+    async keluar(paksa) {
+      const n = Array.from(S.outbox.values()).filter((o) => o.type === 'tx.put').length;
+      if (n && !paksa) {
+        if (navigator.onLine !== false) {
+          const ok = await UI.Sheet.konfirmasi({ judul: 'Ada ' + n + ' transaksi belum terkirim', isi: 'Kirim dulu sebelum keluar?', ok: 'Kirim lalu keluar' });
+          if (!ok) return;
+          await g.Sync.sekarang();
+          if (S.outbox.size) { UI.Toast.show('Belum semua terkirim', 'error', 'Coba lagi saat koneksi stabil.'); return; }
+        } else {
+          const a = await UI.Sheet.konfirmasi({ judul: 'Kamu sedang offline', isi: 'Ada ' + n + ' transaksi yang belum terkirim. Jika keluar sekarang, transaksi itu akan hilang.', ok: 'Tetap keluar', batal: 'Jangan keluar', bahaya: true });
+          if (!a) return;
+          const b = await UI.Sheet.konfirmasi({ judul: 'Yakin?', isi: n + ' transaksi akan dihapus dari HP ini dan tidak bisa dikembalikan.', ok: 'Ya, hapus & keluar', batal: 'Batal', bahaya: true });
+          if (!b) return;
+        }
+      } else if (!paksa) {
+        const ok = await UI.Sheet.konfirmasi({ judul: 'Keluar dari CashKu?', isi: 'Data di HP ini akan dihapus. Semua catatan tetap aman di Google Sheets keluarga.', ok: 'Keluar', bahaya: true });
+        if (!ok) return;
+      }
+      await S.keluar();
+      location.hash = '#/login';
+      location.reload();
+    },
+
+    bisaPasang() { return !sudahAplikasi() && (!!promptPasang || isIOS); },
+    sudahAplikasi,
+    async pasang() {
+      if (sudahAplikasi()) return UI.Toast.show('CashKu sudah terpasang', 'info');
+      if (promptPasang) {
+        promptPasang.prompt();
+        const r = await promptPasang.userChoice.catch(() => null);
+        if (r && r.outcome === 'accepted') UI.Toast.show('CashKu dipasang', 'success', 'Buka dari layar utama HP.');
+        promptPasang = null;
+        return;
+      }
+      const langkah = isIOS
+        ? ['Buka situs ini di <b>Safari</b>.', 'Ketuk tombol <b>Bagikan</b> ' + ic('share', 'ic-sm') + ' di bawah layar.', 'Pilih <b>Tambah ke Layar Utama</b>.', 'Ketuk <b>Tambah</b>. Ikon CashKu muncul di layar utama.']
+        : ['Buka situs ini di <b>Chrome</b>.', 'Ketuk menu <b>⋮</b> di kanan atas.', 'Pilih <b>Instal aplikasi</b> atau <b>Tambahkan ke layar utama</b>.', 'Ikuti petunjuk sampai ikon CashKu muncul.'];
+      UI.Sheet.open({ title: 'Pasang CashKu di HP', html: '<ol style="padding-left:20px;margin:0;line-height:30px;font-size:15px">' + langkah.map((l) => '<li>' + l + '</li>').join('') + '</ol><div class="sheet-foot"><button class="btn block" data-x>Mengerti</button></div>', onMount: (el, s) => { el.querySelector('.sheet-foot [data-x]').onclick = () => s.close(); } });
+    },
+
+    daftarSW() {
+      if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+      // 1.0.18: versi baru dipakai otomatis saat CashKu ditinggalkan (pindah aplikasi / HP dikunci), tanpa menekan tombol
+      const pakaiDiam = (reg) => {
+        if (!reg || !reg.waiting || !navigator.serviceWorker.controller || document.visibilityState !== 'hidden' || !App.bolehMuatUlang()) return;
+        App._mauPerbarui = true;
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      };
+      navigator.serviceWorker.register('sw.js').then((reg) => {
+        App._reg = reg;
+        if (reg.waiting && navigator.serviceWorker.controller) App.tawarkanPembaruan(reg);
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          if (nw) nw.addEventListener('statechange', () => { if (nw.state === 'installed' && navigator.serviceWorker.controller) { App.tawarkanPembaruan(reg); pakaiDiam(reg); } });
+        });
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+          else pakaiDiam(reg);
+        });
+        setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+      }).catch((e) => console.warn('SW gagal didaftarkan', e));
+      // Muat ulang hanya saat pengguna menekan "Muat ulang" (bukan saat pemasangan pertama)
+      let muatUlang = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (muatUlang || !App._mauPerbarui) return; muatUlang = true; location.reload(); });
+    },
+    async muatUlangBersih() {
+      try { if (S.outbox.size && navigator.onLine !== false) await Promise.race([g.Sync.sekarang(), new Promise((r) => setTimeout(r, 5000))]); } catch (e) {}
+      try { if (g.caches) { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } } catch (e) {}
+      try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) { await reg.update().catch(() => {}); if (reg.waiting) { App._mauPerbarui = true; reg.waiting.postMessage({ type: 'SKIP_WAITING' }); setTimeout(() => location.reload(), 1500); return; } } } catch (e) {}
+      location.reload();
+    },
+    tawarkanPembaruan(reg) {
+      if (document.querySelector('.update-bar')) return;
+      const bar = U.el('<div class="update-bar" role="status">' + ic('sparkles') + '<span class="grow small"><b>Versi baru tersedia</b></span><button class="btn sm accent">Muat ulang</button></div>');
+      bar.querySelector('button').onclick = async (e) => {
+        UI.tombolSibuk(e.currentTarget, true);
+        // Kirim dulu data yang belum terkirim (data tetap aman di HP walau belum terkirim)
+        if (S.outbox.size && navigator.onLine !== false) await Promise.race([g.Sync.sekarang(), new Promise((r) => setTimeout(r, 6000))]);
+        App._mauPerbarui = true;
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' }); else location.reload();
+      };
+      document.body.appendChild(bar);
+    }
+  };
+  addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); promptPasang = e; });
+  addEventListener('appinstalled', () => { promptPasang = null; document.querySelectorAll('.login [data-pasang]').forEach((b) => { if (b.previousElementSibling && b.previousElementSibling.classList.contains('hr')) b.previousElementSibling.remove(); b.remove(); }); });
+
+  g.App = App;
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', App.boot); else App.boot();
+})(window);

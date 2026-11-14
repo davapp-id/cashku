@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#008069">
+  <title>Kebijakan Privasi CashKu</title>
+  <link rel="icon" href="icons/favicon-64.png">
+  <link rel="stylesheet" href="jual/jual.css">
+  <script src="js/config.js"></script>
+</head>
+<body>
+<main class="wadah dok">
+  <div class="kepala"><img src="icons/icon-192.png" alt=""><div><b>Kebijakan Privasi &amp; Syarat Penggunaan</b><small>CashKu · berlaku sejak <span data-tgl>November 2026</span></small></div></div>
+  <section class="kartu">
+    <h2>Ringkasnya</h2>
+    <p>CashKu adalah aplikasi pencatat keuangan keluarga. <b>Data keuangan Anda disimpan di Google Drive dan Google Sheets milik Anda sendiri.</b> Penjual CashKu tidak bisa melihat, menyimpan, atau menjual data keuangan Anda.</p>
+
+    <h2>1. Siapa kami</h2>
+    <p>CashKu dijual dan didukung oleh <b data-nama>Penjual CashKu</b>. Hubungi kami lewat <span data-kontak>WhatsApp atau email yang tertera saat pembelian</span>.</p>
+
+    <h2>2. Data yang disimpan di akun Google Anda</h2>
+    <ul>
+      <li>Transaksi, saldo, anggaran, pengingat, catatan, dan akun anggota keluarga yang Anda buat di CashKu.</li>
+      <li>Semuanya tersimpan di satu Google Sheet dan satu server Apps Script di akun Google Anda. Anda bisa melihat, mengunduh, atau menghapusnya kapan saja dari Google Drive.</li>
+      <li>Rekaman suara tidak disimpan; hanya teks hasilnya yang dicatat bila Anda memakai input suara.</li>
+    </ul>
+
+    <h2>3. Izin Google yang diminta pemasang</h2>
+    <p>Saat memasang, halaman pemasang CashKu meminta izin Google untuk:</p>
+    <ul>
+      <li><b>Membuat dan memperbarui proyek Apps Script</b> di akun Anda, yaitu server CashKu milik Anda, termasuk menerapkannya sebagai aplikasi web.</li>
+      <li><b>Melihat alamat email</b> akun Google Anda, untuk mencatat akun mana yang memasang kode aktivasi Anda.</li>
+    </ul>
+    <p>Izin ini hanya dipakai saat Anda memasang atau memperbarui server CashKu, langsung dari browser Anda. Token akses Google tidak disimpan oleh penjual. Pemasang tidak membaca isi Google Drive, email, atau data lain Anda.</p>
+    <p>Penggunaan informasi yang diterima dari Google API mematuhi <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener">Kebijakan Data Pengguna Layanan Google API</a>, termasuk persyaratan Penggunaan Terbatas (Limited Use).</p>
+
+    <h2>4. Data yang disimpan penjual</h2>
+    <ul>
+      <li>Nama pembeli, nomor WhatsApp, dan catatan pembelian (diisi penjual).</li>
+      <li>Kode Aktivasi, email Google yang memasang, alamat dan ID server CashKu Anda, serta versi server.</li>
+    </ul>
+    <p>Data ini dipakai hanya untuk aktivasi, menyambungkan aplikasi ke server Anda, pembaruan, dan bantuan. Data ini tidak dijual atau dibagikan ke pihak lain.</p>
+
+    <h2>5. Menghapus data</h2>
+    <p>Data keuangan: hapus Google Sheet dan proyek "CashKu Server" dari Google Drive Anda. Data di penjual: minta penghapusan lewat kontak di atas, kami proses paling lambat 14 hari. Anda juga bisa mencabut izin pemasang kapan saja di <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</p>
+
+    <h2>6. Syarat penggunaan</h2>
+    <ul>
+      <li>Satu Kode Aktivasi untuk satu keluarga (satu pemasangan). Kode tidak boleh dijual kembali atau dibagikan.</li>
+      <li>Pembelian sekali bayar, tanpa masa aktif. Pembaruan aplikasi diberikan selama CashKu masih dikembangkan.</li>
+      <li>CashKu adalah alat bantu pencatatan, bukan nasihat keuangan profesional. Keputusan keuangan tetap tanggung jawab pengguna.</li>
+      <li>Layanan Google (Drive, Sheets, Apps Script) tunduk pada ketentuan Google. Penjual tidak bertanggung jawab atas gangguan layanan Google.</li>
+    </ul>
+  </section>
+  <div class="kaki"><a href="pasang.html">Pasang CashKu</a></div>
+</main>
+<script>
+  (function () {
+    var c = window.CASHKU_CONFIG || {};
+    if (c.NAMA_PENJUAL) document.querySelector('[data-nama]').textContent = c.NAMA_PENJUAL;
+    var k = [];
+    if (c.WA_PENJUAL) k.push('WhatsApp <a href="https://wa.me/' + String(c.WA_PENJUAL).replace(/[^0-9]/g, '') + '">' + String(c.WA_PENJUAL).replace(/[<>&"]/g, '') + '</a>');
+    if (c.EMAIL_PENJUAL) k.push('email <a href="mailto:' + String(c.EMAIL_PENJUAL).replace(/[<>&"]/g, '') + '">' + String(c.EMAIL_PENJUAL).replace(/[<>&"]/g, '') + '</a>');
+    if (k.length) document.querySelector('[data-kontak]').innerHTML = k.join(' atau ');
+  })();
+</script>
+</body>
+</html>
