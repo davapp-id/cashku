@@ -71,8 +71,12 @@ Masih login dengan akun Google baru. Tampilan Google Cloud berbahasa Inggris; na
    - **Contact information:** email baru Bapak
    - Centang persetujuan, lalu klik **Create**.
 4. **Lengkapi data aplikasi:**
-   - **Branding:** isi **Application home page** `https://NAMAPENGGUNA.github.io/cashku/` dan **Privacy policy** `https://NAMAPENGGUNA.github.io/cashku/privasi.html`. Logo boleh dikosongkan.
-     - Bila Google menolak alamat github.io atau meminta "authorized domain", **kosongkan dulu** kedua kolom ini. Keduanya baru wajib saat mengajukan verifikasi.
+   - **Branding (wajib, kalau tidak tombol Publish app tidak bisa diklik):**
+     - **Application home page:** `https://NAMAPENGGUNA.github.io/cashku/`
+     - **Application privacy policy link:** `https://NAMAPENGGUNA.github.io/cashku/privasi.html`
+     - **Authorized domains → Add domain:** `NAMAPENGGUNA.github.io`
+     - **Developer contact information:** email baru Bapak → **Save**.
+     - Situsnya belum perlu ada saat mengisi. Logo boleh dikosongkan.
    - **Data Access → Add or remove scopes:** centang atau tempel tiga cakupan ini, lalu **Update → Save**:
      - `https://www.googleapis.com/auth/script.projects`
      - `https://www.googleapis.com/auth/script.deployments`
