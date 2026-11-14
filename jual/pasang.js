@@ -158,6 +158,11 @@
       pesan('Setelah mengizinkan di halaman Google, kembali ke sini. Halaman ini memeriksa otomatis.', 'info');
       mulaiPantau();
     },
+    async salinServer(btn) {
+      const url = S.url + '?izin=1';
+      try { await navigator.clipboard.writeText(url); btn.textContent = 'Alamat disalin ✓'; }
+      catch (e) { g.prompt('Salin alamat ini:', url); }
+    },
     async cekIzin(btn) { await dengan(btn, 'Memeriksa…', async () => { if (!(await periksaIzin())) pesan('Server belum diizinkan. Ketuk "Izinkan server" lalu ikuti langkah di halaman Google.'); }); },
     async buatAdmin(btn) {
       const nama = $('#a-nama').value.trim(), user = $('#a-user').value.trim().toLowerCase(), p1 = $('#a-pass').value, p2 = $('#a-pass2').value;

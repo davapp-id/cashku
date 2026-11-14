@@ -2,7 +2,7 @@
 (function (g) {
   'use strict';
   const U = {};
-  U.VERSI = '1.0.26';                    // versi tampilan (naikkan bersama VERSI di sw.js)
+  U.VERSI = '1.0.27';                    // versi tampilan (naikkan bersama VERSI di sw.js)
 
   // ---------- DOM ----------
   U.$ = (sel, root) => (root || document).querySelector(sel);
