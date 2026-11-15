@@ -83,35 +83,47 @@
   };
   /** Alamat situs CashKu (GitHub Pages) tempat tampilan & berkas server terbaru berada */
   Asli.urlSitus = async function () { if (!Asli.aktif()) return ''; try { return (await A().info()).urlPembaruan || ''; } catch (e) { return ''; } };
-  Asli.cekPembaruan = async function (paksa) {
+  // 1.0.32: setiap langkah dibatasi waktunya — sinyal lemah tidak boleh membuat tombol berputar terus
+  const WAKTU_HABIS = 'WAKTU_HABIS';
+  const batasWaktu = (p, ms) => Promise.race([p, new Promise((_, tolak) => setTimeout(() => tolak(new Error(WAKTU_HABIS)), ms))]);
+  let cekJalan = null;
+  Asli.cekPembaruan = function (paksa) {
+    if (cekJalan) return cekJalan;                 // pemeriksaan di latar masih berjalan → tunggu yang sama
+    cekJalan = cekPembaruan_(paksa).finally(() => { cekJalan = null; });
+    return cekJalan;
+  };
+  async function cekPembaruan_(paksa) {
     if (!Asli.aktif() || navigator.onLine === false) return null;
     const terakhir = Number(simpan('cashku_cek_ui') || 0);
     if (!paksa && Date.now() - terakhir < JEDA_CEK) return null;
     simpan('cashku_cek_ui', String(Date.now()));
     let info;
-    try { info = await A().info(); } catch (e) { return null; }
+    try { info = await batasWaktu(A().info(), 6000); } catch (e) { return e.message === WAKTU_HABIS ? { waktuHabis: true } : null; }
     if (!info.urlPembaruan) return null;
     let aset;
+    const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const henti = setTimeout(() => ctrl && ctrl.abort(), 15000);
     try {
-      const res = await fetch(info.urlPembaruan + 'aset.json?t=' + Date.now(), { cache: 'no-store' });
+      const res = await batasWaktu(fetch(info.urlPembaruan + 'aset.json?t=' + Date.now(), { cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }), 16000);
       if (!res.ok) return null;
-      aset = await res.json();
-    } catch (e) { return null; }
+      aset = await batasWaktu(res.json(), 10000);
+    } catch (e) { return (e.name === 'AbortError' || e.message === WAKTU_HABIS) ? { waktuHabis: true } : null; }
+    finally { clearTimeout(henti); }
     if (!aset || !aset.versi || !Array.isArray(aset.berkas) || !Asli.lebihBaru(aset.versi, U.VERSI) || aset.versi === info.gagalVersi) return { terbaru: true, versi: U.VERSI };
     if (simpan('cashku_ui_siap') === aset.versi && simpan('cashku_ui_path')) {
       siapPakai = { path: simpan('cashku_ui_path'), versi: aset.versi };
       return { siap: aset.versi, path: siapPakai.path };
     }
     try {
-      const r = await A().unduhVersi({ url: info.urlPembaruan, versi: aset.versi, berkas: aset.berkas });
-      await A().pakaiVersi({ path: r.path, versi: aset.versi, sekarang: false });
+      const r = await batasWaktu(A().unduhVersi({ url: info.urlPembaruan, versi: aset.versi, berkas: aset.berkas }), 180000);
+      await batasWaktu(A().pakaiVersi({ path: r.path, versi: aset.versi, sekarang: false }), 15000);
       simpan('cashku_ui_siap', aset.versi);
       simpan('cashku_ui_path', r.path);
       siapPakai = { path: r.path, versi: aset.versi };
       if (document.visibilityState === 'hidden') Asli.pakaiOtomatis();
       return { siap: aset.versi, path: r.path };
-    } catch (e) { console.warn('Pembaruan tampilan gagal', e); return { gagal: true }; }
-  };
+    } catch (e) { console.warn('Pembaruan tampilan gagal', e); return e.message === WAKTU_HABIS ? { waktuHabis: true } : { gagal: true }; }
+  }
   Asli.pakaiSekarang = async function (v) {
     try { if (g.Sync && S.outbox.size && navigator.onLine !== false) await Promise.race([g.Sync.sekarang(), new Promise((r) => setTimeout(r, 4000))]); } catch (e) { /* tetap lanjut */ }
     return A().pakaiVersi({ path: v.path, versi: v.versi, sekarang: true });
@@ -197,10 +209,12 @@
       try { const r = await A().pilihNada(); body.querySelector('[data-nama-nada]').textContent = r.nada || 'Bawaan'; } catch (e) { /* dibatalkan */ }
     };
     body.querySelector('[data-cek-ui]').onclick = async (e) => {
-      UI.tombolSibuk(e.currentTarget, true);
-      const r = await Asli.cekPembaruan(true);
-      UI.tombolSibuk(e.currentTarget, false);
-      if (!r) UI.Toast.show('Belum bisa memeriksa', 'warn', 'Pastikan HP tersambung internet.');
+      const btn = e.currentTarget;
+      UI.tombolSibuk(btn, true);
+      let r = null;
+      try { r = await Asli.cekPembaruan(true); } catch (er) { r = null; } finally { UI.tombolSibuk(btn, false); }
+      if (r && r.waktuHabis) UI.Toast.show('Koneksi terlalu lambat', 'warn', 'Coba lagi saat sinyal lebih baik. Pembaruan juga diperiksa otomatis saat CashKu dibuka.');
+      else if (!r) UI.Toast.show('Belum bisa memeriksa', 'warn', 'Pastikan HP tersambung internet.');
       else if (r.terbaru) UI.Toast.show('Tampilan sudah versi terbaru', 'success');
       else if (r.siap) { UI.Toast.show('Memperbarui ke versi ' + r.siap + '…', 'success'); siapPakai = null; setTimeout(() => Asli.pakaiSekarang({ path: r.path, versi: r.siap }), 600); }
       else UI.Toast.show('Pembaruan gagal diunduh', 'error', 'Coba lagi nanti.');
