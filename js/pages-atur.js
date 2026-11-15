@@ -474,9 +474,10 @@
   // =============================================================
   UI.Router.daftar('dompet', {
     izin: () => S.isAdmin(),
-    template() { return UI.header({ title: 'Kelola Dompet' }) + '<div class="page-body" data-body style="padding-bottom:40px"></div>'; },
+    template() { return UI.header({ title: 'Kelola Dompet' }) + '<div class="page-body" data-body style="padding-bottom:100px"></div><button class="fab" data-tambah>' + ic('plus') + 'Dompet</button>'; },
     init(el) {
       el.addEventListener('click', (e) => {
+        if (e.target.closest('[data-tambah]')) { ubahDompet(null); return; }
         if (e.target.closest('[data-saldo-ulang]')) { g.Kelola.saldoDariPengaturan(); return; }
         const b = e.target.closest('[data-dmp]'); if (b) ubahDompet(b.dataset.dmp);
       });
@@ -490,7 +491,7 @@
         '<div class="card" style="margin-top:16px;border:1px solid var(--danger-bg)"><div class="row" style="gap:12px;align-items:flex-start"><span class="ico-c sm" style="background:var(--danger-bg);color:var(--expense)">' + ic('refresh-cw', 'ic-sm') + '</span>' +
         '<span class="grow"><b style="display:block;font-weight:600">Atur ulang saldo</b><span class="small muted">Jadikan saldo dompet 0 (atau angka baru). Riwayat transaksi tetap ada. Bisa juga lewat chat: <b>reset saldo gopay</b>.</span>' +
         '<button class="btn sm danger" style="margin-top:10px" data-saldo-ulang>Atur ulang saldo…</button></span></div></div>' +
-        '<p class="help" style="margin-top:12px">Alias adalah kata yang dikenali di chat untuk dompet ini, misalnya “bri” atau “gopay”.</p>' +
+        '<p class="help" style="margin-top:12px">Ketuk <b>+ Dompet</b> untuk menambah dompet, atau lewat chat: <b>tambah dompet rekening bri saldo 2jt</b>. Alias adalah kata yang dikenali di chat untuk dompet ini, misalnya “bri” atau “gopay”.</p>' +
         '<p class="help">💰 <b>Tabungan</b> adalah uang yang disisihkan. Chat <b>nabung 1jt</b> masuk ke Tabungan, dan Tabungan tidak ditawarkan saat membayar kecuali disebut (<b>beli hp 3jt dari tabungan</b>). Matikan lewat tombol <b>Aktif</b> bila tidak dipakai.</p>';
     }
   });

@@ -35,9 +35,13 @@
       $('[data-kode-selesai]').textContent = S.kode || '';
       if (S.judulSelesai) $('[data-judul-selesai]').textContent = S.judulSelesai;
       if (S.subSelesai) $('[data-sub-selesai]').textContent = S.subSelesai;
+      // 1.0.30: di iPhone/iPad tidak ada APK → tombol utama "Buka CashKu di browser" + petunjuk Tambah ke Layar Utama
+      const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
       $('[data-apk]').href = J.cfg().APK_URL || '#';
-      $('[data-apk]').classList.toggle('tersembunyi', !J.cfg().APK_URL);
+      $('[data-apk]').classList.toggle('tersembunyi', !J.cfg().APK_URL || ios);
       $('[data-buka-web]').href = 'index.html?kode=' + encodeURIComponent(S.kode || '');
+      $('[data-buka-web]').classList.toggle('garis', !ios && !!J.cfg().APK_URL);
+      if (ios && !S.subSelesai) $('[data-sub-selesai]').innerHTML = 'Ketuk <b>Buka CashKu di browser</b>, lalu di Safari ketuk <b>Bagikan</b> → <b>Tambah ke Layar Utama</b>. Masuk dengan Kode Aktivasi dan akun Admin tadi.';
     }
     const wa = String(J.cfg().WA_PENJUAL || '').replace(/[^0-9]/g, '');
     const lw = $('[data-wa]'); if (wa) lw.href = 'https://wa.me/' + wa + '?text=' + encodeURIComponent('Halo, saya butuh bantuan memasang CashKu (kode ' + (S.kode || '-') + ').'); else lw.classList.add('tersembunyi');

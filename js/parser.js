@@ -149,11 +149,12 @@
   function frasaRe(f, global) {
     const k = f + (global ? '#g' : '');
     let r = reCache.get(k);
-    if (!r) { r = new RegExp('(^|[^a-z0-9])(' + escRe(f) + ')(?=$|[^a-z0-9])', global ? 'g' : ''); reCache.set(k, r); }
+    // 1.0.31: spasi di frasa boleh lebih dari satu (sesudah nominal dihapus: "transfer   dari bank")
+    if (!r) { r = new RegExp('(^|[^a-z0-9])(' + escRe(f).replace(/ /g, ' +') + ')(?=$|[^a-z0-9])', global ? 'g' : ''); reCache.set(k, r); }
     if (global) r.lastIndex = 0;
     return r;
   }
-  function cari(text, f) { const m = frasaRe(f).exec(text); return m ? { index: m.index + m[1].length, len: f.length, frasa: f } : null; }
+  function cari(text, f) { const m = frasaRe(f).exec(text); return m ? { index: m.index + m[1].length, len: m[2].length, frasa: f } : null; }
   function ada(text, f) { return frasaRe(f).test(text); }
 
   function normal(s) {
@@ -197,12 +198,32 @@
       else if (k.tipe === 'JENIS_MASUK') masuk.push({ frasa: f });
       else if (k.tipe === 'JENIS_PINDAH') pindah.push({ frasa: f });
     });
-    const dompet = [];
+    const dompet = [], idx0Nama = {};
     ctx.dompet.forEach((d) => {
       if (d.aktif === false) return;
+      idx0Nama[d.id_dompet] = d.nama;
       const fr = [d.nama].concat(String(d.alias || '').split(',')).map((x) => normal(x)).filter((x) => x && KATA_QRIS.indexOf(x) < 0);
       Array.from(new Set(fr)).forEach((f) => dompet.push({ frasa: f, id: d.id_dompet, tipe: d.tipe }));
     });
+    // 1.0.31: alias yang menjadi bagian nama dompet lain diserahkan ke dompet itu ("bca" → "Rekening BCA", bukan "Rekening Bank")
+    const kataNama = {};
+    ctx.dompet.forEach((d) => { if (d.aktif !== false) kataNama[d.id_dompet] = normal(d.nama).split(' '); });
+    for (let i = dompet.length - 1; i >= 0; i--) {
+      const e = dompet[i];
+      if (e.frasa === normal((idx0Nama[e.id] || ''))) continue;
+      const lain = Object.keys(kataNama).some((id) => id !== e.id && e.frasa.indexOf(' ') < 0 && kataNama[id].indexOf(e.frasa) > -1 && kataNama[id].length > 1);
+      if (lain) dompet.splice(i, 1);
+    }
+    // 1.0.31: nama tanpa kata jenis di depan ("Rekening Saudara" → "saudara") dikenali bila tidak bentrok
+    const semuaKataTipe = [].concat.apply([], Object.keys(TIPE_KATA).map((tp) => TIPE_KATA[tp])).concat(['dompet']);
+    const pendek = {};
+    ctx.dompet.forEach((d) => {
+      if (d.aktif === false) return;
+      const m = /^(?:rekening|rek|e-?wallet|e wallet|tabungan|tunai|dompet)\s+(.{3,})$/.exec(normal(d.nama));
+      if (!m || semuaKataTipe.indexOf(m[1]) > -1 || dompet.some((e) => e.frasa === m[1])) return;
+      (pendek[m[1]] = pendek[m[1]] || []).push(d);
+    });
+    Object.keys(pendek).forEach((f) => { if (pendek[f].length === 1) dompet.push({ frasa: f, id: pendek[f][0].id_dompet, tipe: pendek[f][0].tipe }); });
     // Kata umum per jenis dompet ("kas", "rek", "bank", "dompet digital"...). Bila jenisnya punya >1 dompet → ditanyakan.
     const sudah = new Set(dompet.map((e) => e.frasa));
     const idsTipe = (tp) => ctx.dompet.filter((d) => d.aktif !== false && d.tipe === tp).map((d) => d.id_dompet);
@@ -490,8 +511,8 @@
       const re = frasaRe(e.frasa, true);
       let m;
       while ((m = re.exec(text))) {
-        const s = m.index + m[1].length, en = s + e.frasa.length;
-        if (!terpakai.some((r) => s < r[1] && en > r[0])) { hasil.push(Object.assign({ index: s, len: e.frasa.length }, e)); terpakai.push([s, en]); }
+        const s = m.index + m[1].length, en = s + m[2].length;
+        if (!terpakai.some((r) => s < r[1] && en > r[0])) { hasil.push(Object.assign({ index: s, len: m[2].length }, e)); terpakai.push([s, en]); }
         if (re.lastIndex === m.index) re.lastIndex++;
       }
     });
@@ -730,8 +751,17 @@
         if (!dompetHits.length) continue;
         // "kirim ke ibu 500rb via bank" bukan pindah: untuk penanda "... ke", dompet harus tepat sesudahnya
         if (/ ke$/.test(e.frasa) && !dompetHits.some((hh) => hh.index >= h.index + h.len && hh.index <= h.index + h.len + 1)) continue;
+        // "dapat transfer 500rb ke rek" = uang masuk, bukan pindah
+        if (/ ke$/.test(e.frasa) && /\b(dapat|dapet|terima|menerima|diterima|masuk|dikirimi|dikasih)\s*$/.test(tanpaNominal.slice(0, h.index).trim() + ' ')) continue;
       }
       pindahM = h; break;
+    }
+    // 1.0.31: "kirim 1jt dari bank ke rekening saudara" — dua dompet berbeda dengan "dari" & "ke" → pindah saldo
+    if (!pindahM && ctx.fiturDompet && dompetHits.length >= 2) {
+      const hDari = dompetHits.find((hh) => /\bdari$/.test(kataSebelum(tanpaNominal, hh.index)));
+      const hKe = dompetHits.find((hh) => /\bke$/.test(kataSebelum(tanpaNominal, hh.index)) && (!hDari || hh.id !== hDari.id));
+      const v = /\b(kirim|kirimin|kirimkan|transfer|transferin|tf|trf|pindah|pindahin|pindahkan)\b/.exec(tanpaNominal);
+      if (hDari && hKe && v) pindahM = { index: v.index, len: v[0].length, frasa: v[1] };
     }
     const awalKeluar = /^(beli|bayar|bayarin|membeli|membayar|kasih|kirim|transfer ke)\b/.test(tanpaNominal.trim());
     let masukM = null;
@@ -1863,6 +1893,24 @@
   const RE_DIRI = /\b(uangku|duitku|gajiku|pengeluaranku|belanjaanku|jajanku|pemasukanku|pendapatanku|penghasilanku|keuanganku)\b/;
   const RINCI_SISA = /\b(rincian|rinciannya|rinci|rincikan|perincian|perinciannya|merinci|detail|detailnya|detil|detilnya|breakdown|lihat|liat|lihatin|tampilkan|tunjukkan|tunjukin|kasih|tolong|dong|ya|yah|deh|sih|nih|apa|ap|saja|aja|aj|sj|sja|mana|pengeluaran|pengeluaranku|pemasukan|pemasukanku|untuk|buat|utk|bwt|semua|minggu|pekan|bulan|tahun|hari|ini|lalu|kemarin|terakhir|tanggal|sampai|hingga|saya|aku|ku|kami|kita|keluarga|transaksi|catatan|yang|di|ke|dari|kategori|nya|mau|ingin|pengen|coba|bisa|data|jumlah|total|berapa|kali|sering|paling|tersering|beli|bayar|belanja|kapan|dalam|selama|per)\b/g;
 
+  // 1.0.31: pertanyaan total kiriman antar anggota (tanpa nominal)
+  const RE_KIRIMAN_Q = /\b(kiriman|kirimanku|kiriman(?:nya)?|kirim|dikirim|dikirimkan|ngirim|kirimin|terkirim|transfer|transferan|ditransfer|tf|dikasih|ngasih|diberi|diberikan|memberi)\b/;
+  const RE_RANGKUM_Q = /\?|\b(berapa|brp|total|totalnya|jumlah|jumlahnya|rekap|ringkasan|sudah|udah|sdh|selama|per\s*bulan|tiap\s*bulan|setiap\s*bulan|bulanan|riwayat)\b/;
+  function kirimanDari(t, ctx, idx, per, adaPeriode, nominalKuat) {
+    if (nominalKuat || !RE_KIRIMAN_Q.test(t)) return null;
+    if (!RE_RANGKUM_Q.test(t) && !adaPeriode) return null;
+    if (/\b(laporan|pdf|pesan|chat|kode|password|struk|foto)\b/.test(t)) return null;
+    const hit = cariSemua(t, idx.anggota)[0] || cariSemua(t, idx.kirimAnggota || [])[0];
+    // tanpa nama anggota, hanya bila jelas tentang kiriman ("kiriman bulan ini", "total kirim ke anggota")
+    if (!hit && !/\b(kiriman|kirimanku|anggota|keluarga|saudara)\b/.test(t)) return null;
+    const q = { type: 'tanya', metric: 'kiriman' };
+    if (hit && hit.id !== ctx.saya.id) q.penerima = hit.id;
+    if (/\b(saya|aku|ku|kirimanku)\b/.test(t)) q.pengirim = ctx.saya.id;
+    if (/\b(per\s*bulan|tiap\s*bulan|setiap\s*bulan|bulanan)\b/.test(t)) q.perBulan = true;
+    else if (per.ok) q.periode = per; else if (adaPeriode) q.periodeError = per;
+    return q;
+  }
+
   function rincianDari(t, ctx, idx, per, adaPeriode, nominalKuat) {
     if (nominalKuat) return null;
     const masukQ = RE_MASUK_Q.test(t) || (RE_DARI_MANA.test(t) && /\b(uang|duit|rezeki|rejeki|gaji)\b/.test(t) && !/\b(ke\s?mana|kemana|keluar|habis|abis)\b/.test(t));
@@ -2041,6 +2089,10 @@
       return r;
     }
     if (/^(?:lihat |liat |cek |minta |buka )?(laporan|rekap laporan)(?: keuangan| keuanganku| saya| keluarga| kita)?$/.test(t)) return { type: 'laporan_ambigu' };
+
+    // ---- 1.0.31: total kiriman ke anggota ("kirim ke adik bulan ini berapa?", "kiriman per bulan") ----
+    const kq = kirimanDari(t, ctx, idx, per, adaPeriode, nominalKuat);
+    if (kq) { kq.perubahan = kor.perubahan; kq.teksKoreksi = t; return kq; }
 
     // ---- 1.0.17: rincian per kategori/kata, "uangku habis ke mana", "paling sering beli apa" ----
     const rq = rincianDari(t, ctx, idx, per, adaPeriode, nominalKuat);

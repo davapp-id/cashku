@@ -382,7 +382,7 @@
     },
     bantuan(m) {
       const contoh = [['Catat pengeluaran', 'beli kopi 25rb'], ['Beberapa sekaligus', 'bensin 25rb, makan siang 30rb'], ['Pemasukan', 'gaji masuk bri 5jt'],
-        ['Pindah saldo', 'top up gopay 100rb dari bri'], ['Nabung (tunai → rekening)', 'nabung 500rb'], ['Atur saldo dompet', 'saldo bank sekarang 5jt'], ['Tanya', 'jajan bulan ini?'], ['Rincian', 'rincian jajan'], ['Uang ke mana', 'uangku habis ke mana saja'], ['Terbesar', 'pengeluaran terbesar minggu ini'], ['Rata-rata', 'rata-rata pengeluaran per hari'], ['Unduh laporan', 'unduh laporan bulan ini'], ['Nonaktifkan anggaran', 'hapus anggaran jajan'], ['Batalkan', 'batal']];
+        ['Pindah saldo', 'top up gopay 100rb dari bri'], ['Nabung (tunai → rekening)', 'nabung 500rb'], ['Atur saldo dompet', 'saldo bank sekarang 5jt'], ['Tambah dompet', 'tambah dompet rekening bri saldo 2jt'], ['Kirim ke anggota', 'kasih kakak 20rb'], ['Total kiriman', 'kiriman ke kakak bulan ini'], ['Tanya', 'jajan bulan ini?'], ['Rincian', 'rincian jajan'], ['Uang ke mana', 'uangku habis ke mana saja'], ['Terbesar', 'pengeluaran terbesar minggu ini'], ['Rata-rata', 'rata-rata pengeluaran per hari'], ['Unduh laporan', 'unduh laporan bulan ini'], ['Nonaktifkan anggaran', 'hapus anggaran jajan'], ['Batalkan', 'batal']];
       return {
         html: '<p>' + teksAman(m.data.teks || 'Cukup ketik seperti mengobrol. Contoh:') + '</p>' +
           contoh.map((c) => '<div class="ln" style="display:flex;justify-content:space-between;gap:8px;padding:4px 0"><span class="muted small">' + c[0] + '</span><button class="link small" data-isi="' + U.esc(c[1]) + '">' + U.esc(c[1]) + '</button></div>').join('') +
@@ -1219,7 +1219,7 @@
   const tampilC = (x) => CC().tampil(x.label || x, S.ctxParser());
   const strukC = (x) => CC().struktur(x.label || x, S.ctxParser());
   const catatanId = (ids) => S.ingatanSaya().filter((x) => ids.indexOf(x.id_ingatan) > -1);
-  /** Bagian label yang membedakan catatan dari kata yang ditanyakan ("istri", "vicky") */
+  /** Bagian label yang membedakan catatan dari kata yang ditanyakan ("istri", "bunda") */
   function pembeda(x, kata, semua) {
     const s = pembedaDasar(x, kata);
     // label kembar ("punyaku" / "PLN" dua kali) → bedakan dengan awal isinya
@@ -1820,7 +1820,56 @@
       catatan: kor } });
   };
 
+  // 1.0.31: total kiriman antar anggota (PINDAH berketerangan "Kirim ke …"), per anggota atau per bulan
+  Chat.penerimaKiriman = function (t) {
+    if (t.jenis !== 'PINDAH' || !/^kirim ke /i.test(t.keterangan || '')) return null;
+    const dt = t.id_dompet_tujuan && S.dompet(t.id_dompet_tujuan);
+    if (dt && dt.pemilik && dt.pemilik !== t.id_pengguna) return dt.pemilik;
+    const nm = String(t.keterangan).replace(/^kirim ke\s+/i, '').trim().toLowerCase();
+    const a = (S.master.anggota || []).find((x) => String(x.nama || '').trim().toLowerCase().split(/\s+/)[0] === nm);
+    return a ? a.id : 'NAMA:' + String(t.keterangan).replace(/^kirim ke\s+/i, '').trim();
+  };
+  const namaPenerima = (id) => (String(id).indexOf('NAMA:') === 0 ? id.slice(5) : S.orang(id).nama);
+  Chat.jawabKiriman = function (it) {
+    if (it.periodeError) return Chat.sistem(it.periodeError.pesan || 'Periodenya belum bisa kubaca.');
+    const hari = U.hariIni();
+    const semua = S.txTerlihat({}).filter((t) => Chat.penerimaKiriman(t) && (!it.pengirim || t.id_pengguna === it.pengirim));
+    const cocok = (t) => !it.penerima || Chat.penerimaKiriman(t) === it.penerima;
+    const ke = it.penerima ? ' ke ' + S.orang(it.penerima).nama : '';
+    const dari = it.pengirim ? ' dariku' : '';
+    const ekor = '\n\nKiriman antar anggota tidak dihitung sebagai pengeluaran.';
+    if (it.perBulan) {
+      const bulan = [];
+      for (let i = 0; i < 6; i++) { const d = U.parseTgl(hari); d.setDate(1); d.setMonth(d.getMonth() - i); bulan.push(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')); }
+      const list = semua.filter(cocok);
+      const per = bulan.map((b) => ({ b, n: list.filter((t) => t.tanggal_transaksi.slice(0, 7) === b).reduce((x, t) => x + Number(t.nominal || 0), 0) }));
+      const total = per.reduce((x, y) => x + y.n, 0);
+      if (!total) return Chat.sistem('Belum ada kiriman' + ke + dari + ' dalam 6 bulan terakhir.');
+      return Chat.tambah({ kind: 'ringkasan', data: { judul: '🤝 Kiriman' + ke + dari + ' per bulan', total: U.rp(total), kelasTotal: 't-tr', caption: 'Total 6 bulan terakhir',
+        baris: per.filter((x, i) => x.n || i === 0).map((x) => ({ l: U.namaBulan(x.b + '-01'), v: U.rp(x.n) })), catatan: ekor.trim() } });
+    }
+    const per = it.periode || P.periode('bulan ini', hari);
+    const list = semua.filter((t) => cocok(t) && t.tanggal_transaksi >= per.mulai && t.tanggal_transaksi <= per.sampai)
+      .sort((a, b) => (b.tanggal_transaksi + b.waktu_catat).localeCompare(a.tanggal_transaksi + a.waktu_catat));
+    const total = list.reduce((x, t) => x + Number(t.nominal || 0), 0);
+    const label = per.label.replace(/\s*\(.*\)$/, '');
+    if (!list.length) return Chat.tambah({ kind: 'pilihan', data: { teks: 'Belum ada kiriman' + ke + dari + ' ' + label.toLowerCase() + '.',
+      chips: [{ label: 'Lihat per bulan', aksi: 'kirim', nilai: { teks: 'kiriman' + (it.penerima ? ' ke ' + S.orang(it.penerima).nama.toLowerCase() : '') + ' per bulan' } }] } });
+    let baris;
+    if (it.penerima) {
+      baris = list.slice(0, 6).map((t) => ({ l: U.tglPendek(t.tanggal_transaksi) + (S.lihatSemua() && t.id_pengguna !== S.saya.id ? ' · dari ' + S.orang(t.id_pengguna).nama : '') + (S.fiturDompet() && t.id_dompet ? ' · ' + S.namaDompet(t.id_dompet) : ''), v: U.rp(t.nominal) }));
+    } else {
+      const g2 = {};
+      list.forEach((t) => { const p = Chat.penerimaKiriman(t); g2[p] = (g2[p] || 0) + Number(t.nominal || 0); });
+      baris = Object.keys(g2).sort((a, b) => g2[b] - g2[a]).map((p) => ({ l: '👤 ' + namaPenerima(p), v: U.rp(g2[p]) }));
+    }
+    return Chat.tambah({ kind: 'ringkasan', data: { judul: '🤝 Kiriman' + ke + dari + ' · ' + label, total: U.rp(total), kelasTotal: 't-tr',
+      caption: list.length + ' kali kirim',
+      baris, catatan: (it.penerima && list.length > 6 ? '…dan ' + (list.length - 6) + ' lainnya. ' : '') + (it.penerima ? '' : 'Ketik **kiriman ke <nama> per bulan** untuk melihat per bulan. ') + ekor.trim() } });
+  };
+
   Chat.jawabTanya = async function (it) {
+    if (it.metric === 'kiriman') return Chat.jawabKiriman(it);
     if (it.periodeError) {
       const pe = it.periodeError;
       return Chat.tambah({ kind: 'pilihan', data: { teks: pe.pesan, chips: (pe.saran || []).map((s) => ({ label: s.label || s, aksi: 'kirim', nilai: { teks: 'ringkasan ' + (s.teks || s) } })) } });

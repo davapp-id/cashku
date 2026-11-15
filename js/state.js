@@ -88,7 +88,7 @@
   S.dompet = (id) => S.peta().dompet[id] || null;
   S.orang = (id) => S.peta().orang[id] || { id, nama: 'Anggota', warna: '#64748B', peran: 'DEWASA' };
   S.namaDompet = (id) => { const d = S.dompet(id); return d ? d.nama : '—'; };
-  /** Nama dompet + pemiliknya bila milik anggota lain (mode saldo masing-masing): "Rekening Bank Vicky" */
+  /** Nama dompet + pemiliknya bila milik anggota lain (mode saldo masing-masing): "Rekening Bank Bunda" */
   S.namaDompetLengkap = (id) => {
     const d = S.dompet(id);
     if (!d) return '—';
