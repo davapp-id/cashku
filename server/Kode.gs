@@ -24,7 +24,7 @@ const SETUP = {
 
 const APP = {
   NAMA: 'CashKu',
-  VERSI: '1.0.29',
+  VERSI: '1.0.32',
   TZ: 'Asia/Makassar',
   TOKEN_HARI: 30,           // masa berlaku sesi
   JENDELA_BULAN: 24,        // transaksi yang disimpan di HP
@@ -148,6 +148,7 @@ const ROUTES = {
   dompetSimpan:    { auth: 'ADMIN', fn: apiDompetSimpan_, write: true },
   pengaturanSimpan:{ auth: 'ADMIN', fn: apiPengaturanSimpan_, write: true },
   modeSaldo:       { auth: 'ADMIN', fn: apiModeSaldo_, write: true },
+  dompetAnggota:   { auth: 'ADMIN', fn: apiDompetAnggota_, write: true },
   pushKunci:       { auth: 'USER', fn: apiPushKunci_ },
   pushDaftar:      { auth: 'USER', fn: apiPushDaftar_, write: true },
   pushUji:         { auth: 'USER', fn: apiPushUji_, write: true },
@@ -886,9 +887,11 @@ function apiPenggunaSimpan_(ctx, d) {
   }
   t.dirty = true;
   writeTable_(t);
-  if (aksiLog === 'tambah' && modeSaldo_() === 'MASING') {
+  // 1.0.32: saldo masing-masing → anggota aktif (baru, diaktifkan lagi, atau diubah) selalu punya set dompetnya
+  if (aktif && modeSaldo_() === 'MASING') {
+    const uidDompet = aksiLog === 'tambah' ? t.rows[t.rows.length - 1][t.col.id_pengguna] : d.id;
     const td = readTable_(SHEET.dompet);
-    if (salinDompetAnggota_(td, [t.rows[t.rows.length - 1][t.col.id_pengguna]])) writeTable_(td);
+    if (salinDompetAnggota_(td, [uidDompet])) writeTable_(td);
   }
   bumpMaster_();
   logAturLangsung_(ctx.user, 'AKUN', aksiLog + ' @' + username + ' — ' + (String(d.nama_tampilan || '').trim() || username) + ' (' + peran + (d.hubungan ? ', ' + hubungan_(d.hubungan) : '') + ')');
@@ -989,6 +992,17 @@ function saldoServer_() {
   const t = readTable_(SHEET.transaksi);
   t.rows.forEach(function (r) { const o = rowToTx_(t, r); if (o.status === 'AKTIF') tambahBasis_(basis, byId, o); });
   return basis;
+}
+/** 1.0.32: Admin membuatkan set dompet untuk anggota yang belum punya (saldo masing-masing). Aman diulang. */
+function apiDompetAnggota_(ctx, d) {
+  if (modeSaldo_() !== 'MASING') return fail_('Dompet anggota hanya dipakai pada saldo masing-masing.');
+  const aktifIds = tableObjects_(SHEET.pengguna).filter(function (u) { return truthy_(u.aktif); }).map(function (u) { return u.id_pengguna; });
+  const ids = d && d.id ? [String(d.id)] : aktifIds;
+  if (d && d.id && aktifIds.indexOf(String(d.id)) < 0) return fail_('Anggota tidak ditemukan atau nonaktif.');
+  const td = readTable_(SHEET.dompet);
+  const dibuat = salinDompetAnggota_(td, ids);
+  if (dibuat) { writeTable_(td); bumpMaster_(); }
+  return ok_({ dibuat: dibuat });
 }
 function apiModeSaldo_(ctx, d) {
   const mode = String(d.mode || '').toUpperCase();

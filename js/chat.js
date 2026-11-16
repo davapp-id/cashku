@@ -439,6 +439,15 @@
     const v = c.nilai || {};
     switch (c.aksi) {
       case 'kirim': if (!c.tetap) await tandai(m, i); return Chat.kirim(v.teks);
+      case 'dompetAnggota': {
+        if (!UI.perluOnline()) return;
+        await tandai(m, i);
+        const res = await g.API.api('dompetAnggota', { id: v.id });
+        if (!res.success) return Chat.sistem('Belum bisa membuat dompet: ' + (res.message || 'coba lagi nanti.'));
+        await g.Sync.sekarang({ paksaMaster: true });
+        await Chat.sistem('Dompet **' + v.nama + '** sudah dibuat ✅' + (v.teks ? '' : ' Ketik kirimannya lagi ya.'));
+        return v.teks ? Chat.kirim(v.teks) : null;
+      }
       case 'isi': Chat.input.value = v.teks; Chat.autoTinggi(); Chat.input.focus(); return;
       case 'buka': if (!c.tetap) await tandai(m, i); return UI.Router.go(v.halaman, v.param);
       case 'kategori': await tandai(m, i); if (Chat.pending && Chat.pending.type === 'kategoriPilih') Chat.pending = null; return Chat.setelahPilihKategori(v.txId, v.katId, v.frasa);
@@ -923,8 +932,15 @@
     tanyaD.forEach((d) => { const kk = (d.dompetPilihan || []).join(',') || '*'; (grup[kk] = grup[kk] || []).push(d); });
     Object.keys(grup).forEach((kk) => klar.push({ type: 'dompetBayar', ds: grup[kk], pilihan: kk === '*' ? null : kk.split(',') }));
     if (jelas.length) await Chat.simpanDrafts(jelas, teksAsli, batch);
-    for (const d of tanpaDompet) await Chat.sistem(!d.id_dompet ? 'Kamu belum punya dompet untuk mengirim uang. Minta Admin mengaktifkan dompetmu di **Pengaturan → Kelola dompet**.'
-      : '**' + d.pindahAnggota.nama + '** belum punya dompet untuk menerima. Admin bisa mengaturnya di **Pengaturan → Mode saldo**.');
+    for (const d of tanpaDompet) {
+      if (!d.id_dompet) { await Chat.sistem('Kamu belum punya dompet untuk mengirim uang. Minta Admin mengaktifkan dompetmu di **Pengaturan → Kelola dompet**.'); continue; }
+      // 1.0.32: Admin bisa langsung membuatkan dompet penerima, lalu kiriman dicatat ulang
+      if (S.isAdmin() && d.pindahAnggota.id) {
+        await Chat.tambah({ kind: 'pilihan', data: { teks: '**' + d.pindahAnggota.nama + '** belum punya dompet untuk menerima.',
+          sub: drafts.length === 1 ? 'Buatkan dompetnya sekarang? Setelah itu kirimanmu langsung dicatat.' : 'Buatkan dompetnya sekarang, lalu ketik kiriman itu lagi.',
+          chips: [{ label: 'Buatkan dompet ' + d.pindahAnggota.nama, aksi: 'dompetAnggota', nilai: { id: d.pindahAnggota.id, nama: d.pindahAnggota.nama, teks: drafts.length === 1 ? teksAsli : '' }, gaya: 'acc' }, { label: 'Nanti saja', aksi: 'tutup' }] } });
+      } else await Chat.sistem('**' + d.pindahAnggota.nama + '** belum punya dompet untuk menerima. Minta Admin membuatkannya (ketik kirimanmu lagi di HP Admin, lalu ketuk **Buatkan dompet**).');
+    }
     if (pindahOff) await Chat.sistem(S.master.dompet.some((d) => d.aktif !== false && d.tipe === 'TABUNGAN')
       ? 'Dompet sedang digabung jadi satu, jadi pindah antar dompet tidak perlu dicatat. Yang tetap dicatat: **nabung** dan **ambil tabungan**.'
       : 'Dompet sedang digabung jadi satu, jadi pindah saldo tidak perlu dicatat.');
