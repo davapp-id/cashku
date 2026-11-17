@@ -258,9 +258,9 @@
     const d = m.data;
     if (!d.chips || !d.chips.length) return '';
     return '<div class="chips">' + d.chips.map((c, i) => {
-      const dipilih = d.selesai && d.dipilih === i;
+      const dipilih = (d.selesai && d.dipilih === i) || !!c.sudah;
       const kelas = dipilih ? 'chip on' : 'chip ' + (c.gaya || '');
-      return '<button class="' + kelas + '" data-aksi data-msg="' + m.id + '" data-i="' + i + '"' + (d.selesai && !c.tetap ? ' disabled' : '') + '>' +
+      return '<button class="' + kelas + '" data-aksi data-msg="' + m.id + '" data-i="' + i + '"' + ((d.selesai && !c.tetap) || c.sudah ? ' disabled' : '') + '>' +
         (dipilih ? ic('check', 'ic-sm') : (c.ikon ? ic(c.ikon, 'ic-sm') : '')) + U.esc(c.label) + '</button>';
     }).join('') + '</div>';
   }
@@ -382,7 +382,7 @@
     },
     bantuan(m) {
       const contoh = [['Catat pengeluaran', 'beli kopi 25rb'], ['Beberapa sekaligus', 'bensin 25rb, makan siang 30rb'], ['Pemasukan', 'gaji masuk bri 5jt'],
-        ['Pindah saldo', 'top up gopay 100rb dari bri'], ['Nabung (tunai → rekening)', 'nabung 500rb'], ['Atur saldo dompet', 'saldo bank sekarang 5jt'], ['Tambah dompet', 'tambah dompet rekening bri saldo 2jt'], ['Kirim ke anggota', 'kasih kakak 20rb'], ['Total kiriman', 'kiriman ke kakak bulan ini'], ['Tanya', 'jajan bulan ini?'], ['Rincian', 'rincian jajan'], ['Uang ke mana', 'uangku habis ke mana saja'], ['Terbesar', 'pengeluaran terbesar minggu ini'], ['Rata-rata', 'rata-rata pengeluaran per hari'], ['Unduh laporan', 'unduh laporan bulan ini'], ['Nonaktifkan anggaran', 'hapus anggaran jajan'], ['Batalkan', 'batal']];
+        ['Pindah saldo', 'top up gopay 100rb dari bri'], ['Nabung (tunai → rekening)', 'nabung 500rb'], ['Atur saldo dompet', 'saldo bank sekarang 5jt'], ['Tambah dompet', 'tambah dompet rekening bri saldo 2jt'], ['Hapus dompet', 'hapus dompet rekening bri'], ['Tambah kategori', 'tambah kategori hewan peliharaan'], ['Tambah kata kunci', 'tambah kata kunci pakan kucing ke hewan peliharaan'], ['Kirim ke anggota', 'kasih kakak 20rb'], ['Total kiriman', 'kiriman ke kakak bulan ini'], ['Tanya', 'jajan bulan ini?'], ['Rincian', 'rincian jajan'], ['Uang ke mana', 'uangku habis ke mana saja'], ['Terbesar', 'pengeluaran terbesar minggu ini'], ['Rata-rata', 'rata-rata pengeluaran per hari'], ['Unduh laporan', 'unduh laporan bulan ini'], ['Nonaktifkan anggaran', 'hapus anggaran jajan'], ['Batalkan', 'batal']];
       return {
         html: '<p>' + teksAman(m.data.teks || 'Cukup ketik seperti mengobrol. Contoh:') + '</p>' +
           contoh.map((c) => '<div class="ln" style="display:flex;justify-content:space-between;gap:8px;padding:4px 0"><span class="muted small">' + c[0] + '</span><button class="link small" data-isi="' + U.esc(c[1]) + '">' + U.esc(c[1]) + '</button></div>').join('') +
@@ -447,6 +447,53 @@
         await g.Sync.sekarang({ paksaMaster: true });
         await Chat.sistem('Dompet **' + v.nama + '** sudah dibuat ✅' + (v.teks ? '' : ' Ketik kirimannya lagi ya.'));
         return v.teks ? Chat.kirim(v.teks) : null;
+      }
+      case 'kunciTambah': {
+        if (c.sudah) return;
+        c.sudah = true; await Chat.ubah(m);
+        return Chat.kunciSimpan(v.katId, [v.frasa], { diam: true });
+      }
+      case 'kunciSemua': {
+        const sisa = m.data.chips.filter((x) => x.aksi === 'kunciTambah' && !x.sudah);
+        sisa.forEach((x) => { x.sudah = true; });
+        await tandai(m, i);
+        if (Chat.pending && Chat.pending.type === 'kataKunci') Chat.pending = null;
+        return Chat.kunciSimpan(v.katId, sisa.map((x) => x.nilai.frasa), { selesai: true });
+      }
+      case 'kunciSelesai': await tandai(m, i); if (Chat.pending && Chat.pending.type === 'kataKunci') Chat.pending = null; return Chat.kunciSelesai(v.katId);
+      case 'kunciKat': {
+        await tandai(m, i);
+        if (Chat.pending && Chat.pending.type === 'kunciKat') Chat.pending = null;
+        return v.kata && v.kata.length ? Chat.kunciSimpan(v.katId, v.kata, { tawar: true }) : Chat.kunciTawar(v.katId);
+      }
+      case 'kunciKatLain': {
+        const pilih = await UI.Sheet.pilih({ judul: 'Masuk kategori apa?', opsi: S.kategoriAktif().map((k) => ({ value: k.id_kategori, label: k.nama, ikon: k.ikon, sub: k.jenis === 'MASUK' ? 'Pemasukan' : '' })) });
+        if (!pilih) return;
+        m.data.chips.splice(m.data.chips.length - 1, 0, { label: S.kat(pilih).ikon + ' ' + S.kat(pilih).nama, aksi: 'kunciKat', nilai: { katId: pilih, kata: v.kata } });
+        await tandai(m, m.data.chips.length - 2);
+        if (Chat.pending && Chat.pending.type === 'kunciKat') Chat.pending = null;
+        return v.kata && v.kata.length ? Chat.kunciSimpan(pilih, v.kata, { tawar: true }) : Chat.kunciTawar(pilih);
+      }
+      case 'urungKunci': {
+        await tandai(m, i);
+        for (const x of v.daftar || []) {
+          if (x.lama) await S.ubahMaster('kamus.put', { id_kamus: x.id, frasa: x.frasa, tipe: 'KATEGORI', target: x.lama.target, sumber: x.lama.sumber || 'MANUAL' });
+          else await S.ubahMaster('kamus.del', { id_kamus: x.id });
+        }
+        return Chat.sistem('Oke, kata kunci tadi nggak jadi disimpan ↩️');
+      }
+      case 'dompetHapusPilih': await tandai(m, i); return Chat.dompetHapusTanya(v.id);
+      case 'dompetHapusYa': {
+        if (!UI.perluOnline()) return;
+        await tandai(m, i);
+        await g.Sync.sekarang();
+        if (S.jumlahAntre()) return Chat.sistem('Masih ada catatan yang belum terkirim. Tunggu sebentar, lalu coba lagi ya.');
+        const nama = (S.dompet(v.id) || {}).nama || 'dompet';
+        const res = await g.API.api('dompetHapus', { id: v.id, tujuan: v.tujuan || '' });
+        if (!res.success && res.data && res.data.code === 'PERLU_TUJUAN') return Chat.dompetHapusTanya(v.id, res.data.saldo);
+        if (!res.success) return Chat.sistem('Belum bisa menghapus: ' + (res.message || 'coba lagi nanti.'));
+        await g.Sync.sekarang({ paksaMaster: true });
+        return Chat.sistem('Dompet **' + nama + '** sudah dihapus 🧽' + (v.tujuan ? ' Sisa saldonya dipindah ke **' + ((S.dompet(v.tujuan) || {}).nama || '') + '**.' : '') + ' Riwayat transaksi lama tetap ada.');
       }
       case 'isi': Chat.input.value = v.teks; Chat.autoTinggi(); Chat.input.focus(); return;
       case 'buka': if (!c.tetap) await tandai(m, i); return UI.Router.go(v.halaman, v.param);
@@ -769,6 +816,27 @@
         if (RE_TIDAK.test(tt) || /^bukan\b/.test(tt)) return p.jawab(false);
       }
       if (p.type === 'pnLunas' && p.jawab(teks)) { Chat.pending = null; return; }
+      // 1.0.33: menunggu kata kunci / kategori untuk kata kunci
+      if ((p.type === 'kataKunci' || p.type === 'kunciKat') && Date.now() < p.sampai && !/\d/.test(teks)) {
+        const tt = P.normal(teks).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (/^(selesai|sudah|udah|sdh|cukup|nggak|tidak|ga|gak|enggak|nanti|nanti saja|nanti aja|skip|lewati|batal|ga usah|gak usah|nggak usah|tidak usah|itu saja|itu aja|sudah cukup|udah cukup)$/.test(tt)) {
+          if (p.m && !p.m.data.selesai) await tandai(p.m, -1);
+          return p.type === 'kataKunci' ? Chat.kunciSelesai(p.katId) : Chat.sistem('Oke, nggak jadi 👌');
+        }
+        const it0 = P.analisis(teks, S.ctxParser());
+        const perintah = it0 && ['atur', 'aturMenu', 'tanya', 'unduh', 'bantuan', 'kataKunci', 'batal', 'ajari', 'lupakan', 'tanyaKata', 'dompetHapus', 'pengingat', 'pengingatDaftar', 'pengingatHapus',
+          'ingatanSimpan', 'ingatanTanya', 'ingatanDaftar', 'ingatanHapus', 'saldoUlang', 'resetInfo', 'targetDaftar', 'targetHapus', 'penasihat', 'anggaranStatus', 'namaSet', 'obrolan', 'laporan_ambigu'].indexOf(it0.type) > -1;
+        if (!perintah && p.type === 'kunciKat') {
+          const ids = Chat.kategoriDariJawaban(teks);
+          if (ids.length === 1) { if (p.m && !p.m.data.selesai) await tandai(p.m, -1); return p.kata.length ? Chat.kunciSimpan(ids[0], p.kata, { tawar: true }) : Chat.kunciTawar(ids[0]); }
+          Chat.pending = p;
+          return Chat.sistem('Kategori “' + teks.trim() + '” belum ketemu 🤔 Ketuk salah satu tombol di atas, atau **Lainnya…**.');
+        }
+        if (!perintah) {
+          const kata = P.daftarKata(teks);
+          if (kata.length) return Chat.kunciSimpan(p.katId, kata, { lanjut: true });
+        }
+      }
       if (p.type === 'ingatanNilai' && teks.trim() && !/^(batal|tidak|nggak|ga jadi|gak jadi)$/i.test(teks.trim())) return p.jawab(teks.trim());
       if (p.type === 'ingatanPemilik' && teks.trim() && teks.trim().split(/\s+/).length <= 3 && !/^(batal|ga jadi|gak jadi|nggak jadi)$/i.test(teks.trim())) {
         const v = P.normal(teks).replace(/^(?:milik|punya|punyanya|atas nama|a\.?n\.?)\s+/, '').trim();
@@ -876,6 +944,8 @@
       case 'bantuan': return Chat.tambah({ kind: 'bantuan', data: { teks: 'Cukup ketik kayak lagi ngobrol, ya. Contoh:' } });
       case 'obrolan': return Chat.obrolan(it);
       case 'ajari': return Chat.ajari(it);
+      case 'dompetHapus': return Chat.dompetHapus(it);
+      case 'kataKunci': return Chat.kataKunci(it);
       case 'lupakan': return Chat.lupakan(it);
       case 'tanyaKata': return Chat.tanyaKata(it);
       case 'laporan_ambigu':
@@ -1150,6 +1220,150 @@
     const e = S.master.kamus.find((x) => x.tipe === 'KATEGORI' && P.normal(x.frasa) === f && ada(x.target));
     if (e) return Chat.sistem('“' + f + '” biasanya aku masukkan ke ' + G.kat(e.target) + ' 👍');
     return Chat.sistem('Aku belum kenal “' + f + '” 🤔 Ajari aku dong, misalnya: **ingat ' + f + ' masuk jajan**.');
+  };
+
+  // ---------- 1.0.33: kata kunci kategori lewat chat ----------
+  const SAMPAI_KUNCI = () => Date.now() + 10 * 60000;
+  /** Keterangan transaksi "Lain-lain"/"Pemasukan Lain" 90 hari terakhir (terbaru dulu) → bahan saran kata kunci */
+  Chat.catatanLain = function () {
+    const c = S.ctxParser(), ids = [c.kategoriDefaultKeluar, c.kategoriDefaultMasuk];
+    const batas = U.tambahHari ? U.tambahHari(U.hariIni(), -90) : '0000-00-00';
+    const xs = [];
+    S.tx.forEach((t) => { if (t.status === 'AKTIF' && ids.indexOf(t.id_kategori) > -1 && t.keterangan && t.tanggal_transaksi >= batas) xs.push(t); });
+    xs.sort((a, b) => (a.tanggal_transaksi < b.tanggal_transaksi ? 1 : -1));
+    return Array.from(new Set(xs.map((t) => P.normal(t.keterangan)))).slice(0, 40);
+  };
+  Chat.kunciKategori = (katId) => S.master.kamus.filter((e) => e.tipe === 'KATEGORI' && e.target === katId).map((e) => P.normal(e.frasa));
+  /** Tawarkan kata kunci untuk kategori: saran dari aplikasi + ketik sendiri */
+  Chat.kunciTawar = async function (katId, o) {
+    o = o || {};
+    const k = S.kat(katId);
+    if (!k || !k.id_kategori) return;
+    const ada = Chat.kunciKategori(katId);
+    const saran = P.saranKataKunci(k.nama, k.jenis, S.ctxParser(), { catatan: Chat.catatanLain(), katId }).filter((f) => ada.indexOf(f) < 0).slice(0, 8);
+    const chips = saran.map((f) => ({ label: '+ ' + f, aksi: 'kunciTambah', nilai: { katId, frasa: f } }));
+    if (saran.length > 1) chips.push({ label: 'Tambah semua', aksi: 'kunciSemua', nilai: { katId }, gaya: 'acc' });
+    chips.push({ label: 'Selesai', aksi: 'kunciSelesai', nilai: { katId }, gaya: 'ghost' });
+    const nama = '**' + k.ikon + ' ' + k.nama + '**';
+    const teks = (o.teks ? o.teks + '\n' : '') + (ada.length ? 'Kata kunci ' + nama + ' sekarang: ' + ada.slice(0, 15).join(', ') + (ada.length > 15 ? ', …' : '') + '\n' : '') +
+      'Kata apa saja yang masuk ' + nama + '? Biar langsung aku kenali waktu dicatat 😉';
+    const sub = (saran.length ? 'Ketuk saran di bawah, atau ketik sendiri. ' : 'Ketik kata kuncinya, ') + 'Pisahkan dengan koma, contoh: **' + (saran.slice(0, 2).join(', ') || 'pakan kucing, vaksin') + '**' + (S.bolehKelola() ? '' : '\nKata baru dikirim dulu ke ' + Chat.pengurus() + ' untuk disetujui.');
+    const m = await Chat.tambah({ kind: 'pilihan', data: { teks, sub, chips } });
+    Chat.pending = { type: 'kataKunci', katId, m, sampai: SAMPAI_KUNCI() };
+    return m;
+  };
+  /** Simpan kata kunci ke kategori. o.diam: dari tombol saran (cukup notifikasi); o.lanjut: masih menunggu ketikan berikutnya */
+  Chat.kunciSimpan = async function (katId, kata, o) {
+    o = o || {};
+    const k = S.kat(katId);
+    const baru = [], pindah = [], sudah = [], umum = [], urung = [];
+    const usul = !S.bolehKelola();
+    for (const f0 of kata) {
+      const f = P.normal(f0).replace(/[^a-z0-9&\- ]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!f || [].concat(baru, sudah, umum).indexOf(f) > -1) continue;
+      if (P.kataUmum(f) || f.length < 2 || /^(dan|atau|yang|ke|di|untuk|buat|kata|kunci|kategori)$/.test(f)) { umum.push(f); continue; }
+      const lama = S.master.kamus.find((e) => e.tipe === 'KATEGORI' && P.normal(e.frasa) === f);
+      if (lama && lama.target === katId) { sudah.push(f); continue; }
+      if (usul) { await S.ubahMaster('usulan.put', { id_usulan: 'USL-' + Date.now().toString(36) + U.rand(4), frasa: f, id_kategori_usulan: katId }); baru.push(f); continue; }
+      const id = lama ? lama.id_kamus : 'KMS-' + Date.now().toString(36) + U.rand(4);
+      await S.ubahMaster('kamus.put', { id_kamus: id, frasa: f, tipe: 'KATEGORI', target: katId, sumber: 'MANUAL' });
+      urung.push({ id, frasa: f, lama: lama ? { target: lama.target, sumber: lama.sumber } : null });
+      if (lama && S.master.kategori.some((x) => x.id_kategori === lama.target)) pindah.push(f + ' (sebelumnya ' + S.kat(lama.target).nama + ')'); else baru.push(f);
+    }
+    const nama = '**' + k.ikon + ' ' + k.nama + '**';
+    if (o.diam) {
+      if (baru.length || pindah.length) UI.Toast.show(usul ? 'Usulan dikirim' : 'Kata kunci ditambah', 'success', '“' + (baru[0] || pindah[0]) + '” → ' + k.nama);
+      else if (sudah.length) UI.Toast.show('Sudah ada', 'info', '“' + sudah[0] + '” sudah masuk ' + k.nama);
+      return;
+    }
+    const baris = [];
+    if (usul && baru.length) baris.push('Usulan kata kunci ' + nama + ' sudah aku kirim ke ' + Chat.pengurus() + ': ' + baru.join(', ') + ' 👍');
+    else if (baru.length || pindah.length) baris.push('Siap ✅ Kata kunci ' + nama + ': ' + baru.concat(pindah).join(', '));
+    if (sudah.length) baris.push((baris.length ? 'Sudah ada sebelumnya: ' : 'Sudah ada di ' + nama + ' sebelumnya 👍: ') + sudah.join(', '));
+    if (umum.length) baris.push('Terlalu umum, tidak disimpan: ' + umum.join(', '));
+    if (!baris.length) baris.push('Belum ada kata yang bisa disimpan 🤔 Contoh: **pakan kucing, vaksin**');
+    const sub = (baru.length || pindah.length) && !usul ? 'Salah ketik sedikit juga tetap aku kenali 😉' + (o.lanjut ? ' Ketik lagi kalau masih ada, atau ketuk **Selesai**.' : '') : (o.lanjut ? 'Ketik lagi kalau masih ada, atau ketuk **Selesai**.' : '');
+    const chips = [];
+    if (urung.length) chips.push({ label: 'Urungkan', aksi: 'urungKunci', nilai: { daftar: urung }, gaya: 'ghost', ikon: 'undo-2' });
+    if (o.lanjut) chips.push({ label: 'Selesai', aksi: 'kunciSelesai', nilai: { katId } });
+    else if (o.tawar) chips.push({ label: 'Tambah kata lain', aksi: 'kunciKat', nilai: { katId, kata: [] } });
+    const m = await Chat.tambah({ kind: 'pilihan', data: { teks: baris.join('\n'), sub, chips } });
+    if (o.lanjut) Chat.pending = { type: 'kataKunci', katId, m, sampai: SAMPAI_KUNCI() };
+    if (o.selesai) await Chat.kunciSelesai(katId, true);
+    return m;
+  };
+  Chat.kunciSelesai = function (katId, singkat) {
+    const k = S.kat(katId) || {};
+    const ada = katId ? Chat.kunciKategori(katId) : [];
+    const contoh = ada[0] ? '**' + ada[0] + ' 50rb**' : '';
+    if (singkat) return contoh ? Chat.sistem('Coba catat, misalnya ' + contoh + ' 👍') : null;
+    return Chat.sistem('Sip 👍' + (contoh ? ' Coba catat, misalnya ' + contoh + '.' : '') + (k.nama ? ' Mau tambah lagi nanti, ketik: **tambah kata kunci … ke ' + P.normal(k.nama) + '**' : '') +
+      (k.jenis === 'KELUAR' && S.isAdmin() && !S.master.anggaran.some((a) => a.aktif !== false && a.id_kategori === katId) ? '\nMau kasih anggaran? Ketik misalnya **anggaran ' + P.normal(k.nama) + ' 300rb**.' : ''));
+  };
+  /** Hasil parser "tambah kata kunci …": kategori jelas → simpan; belum jelas → tampilkan pilihan kategori */
+  Chat.kataKunci = async function (it) {
+    const kata = it.kata || [];
+    const ks = (it.kandidat || []).filter((id) => S.master.kategori.some((k) => k.id_kategori === id && k.aktif !== false));
+    if (ks.length === 1) return kata.length ? Chat.kunciSimpan(ks[0], kata, { tawar: true }) : Chat.kunciTawar(ks[0]);
+    // urutkan kategori yang paling mungkin: kata kunci yang mirip, lalu urutan biasa
+    const skor = {};
+    const tok = [].concat.apply([], kata.map((f) => P.normal(f).split(' '))).filter((w) => w.length >= 3);
+    S.master.kamus.forEach((e) => {
+      if (e.tipe !== 'KATEGORI') return;
+      const ws = P.normal(e.frasa).split(' ');
+      if (tok.some((w) => ws.indexOf(w) > -1)) skor[e.target] = (skor[e.target] || 0) + 1;
+    });
+    // kata yang sama dengan nama kategori paling kuat ("dokter hewan" → Hewan Peliharaan)
+    S.kategoriAktif().forEach((k) => { const ws = P.normal(k.nama).split(/[^a-z0-9]+/); if (tok.some((w) => ws.indexOf(w) > -1)) skor[k.id_kategori] = (skor[k.id_kategori] || 0) + 3; });
+    const semua = ks.length > 1 ? ks.map((id) => S.kat(id)) : S.kategoriAktif().filter((k) => k.id_kategori !== S.ctxParser().kategoriDefaultKeluar && k.id_kategori !== S.ctxParser().kategoriDefaultMasuk)
+      .sort((a, b) => (skor[b.id_kategori] || 0) - (skor[a.id_kategori] || 0) || (a.jenis === b.jenis ? 0 : a.jenis === 'KELUAR' ? -1 : 1) || (a.urutan || 0) - (b.urutan || 0));
+    const daftar = kata.length ? '“' + kata.join(', ') + '”' : '';
+    const teks = (it.katTeks && !ks.length ? 'Kategori “' + it.katTeks + '” belum ketemu 🤔 ' : '') + (kata.length ? 'Kata kunci ' + daftar + ' masuk kategori apa?' : 'Mau tambah kata kunci untuk kategori apa?');
+    const chips = semua.slice(0, 7).map((k) => ({ label: k.ikon + ' ' + k.nama, aksi: 'kunciKat', nilai: { katId: k.id_kategori, kata } }))
+      .concat([{ label: 'Lainnya…', aksi: 'kunciKatLain', nilai: { kata }, gaya: 'ghost' }]);
+    if (it.katTeks && !ks.length && S.isAdmin()) chips.splice(0, 0, { label: '+ Kategori baru “' + U.huruf1(it.katTeks) + '”', aksi: 'kirim', nilai: { teks: 'tambah kategori ' + it.katTeks + (kata.length ? ' dengan kata kunci ' + kata.join(', ') : '') } });
+    const m = await Chat.tambah({ kind: 'pilihan', data: { teks, sub: 'Ketuk kategorinya, atau ketik namanya.', chips } });
+    Chat.pending = { type: 'kunciKat', kata, m, sampai: SAMPAI_KUNCI() };
+    return m;
+  };
+
+  // ---------- 1.0.33: hapus dompet lewat chat ----------
+  const polosNama = (x) => P.normal(String(x || '')).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+  Chat.dompetHapus = async function (it) {
+    if (!S.isAdmin()) return Chat.sistem('Menghapus dompet hanya bisa dilakukan Admin 🙏');
+    const bisa = S.master.dompet.filter(S.bolehHapusDompet);
+    const t = polosNama(it.teks).replace(/^rek\b/, 'rekening');
+    const semua = S.master.dompet.filter((d) => !d.dihapus && !S.dompetKlon(d));
+    const cocok = (d) => {
+      const nm = polosNama(d.nama);
+      if (!t) return false;
+      if (nm === t || nm.replace(/^rekening /, '') === t.replace(/^rekening /, '')) return true;
+      const ws = t.split(' ').filter((w) => w.length >= 2);
+      return ws.length && ws.every((w) => nm.split(' ').some((x) => x === w || (w.length >= 4 && P.lev(x, w) <= 1) || (w === 'rek' && x === 'rekening')));
+    };
+    let c = semua.filter(cocok);
+    if (c.length > 1) { const pas = c.filter((d) => polosNama(d.nama) === t); if (pas.length === 1) c = pas; }
+    if (c.length === 1 && !S.bolehHapusDompet(c[0])) {
+      return Chat.tambah({ kind: 'pilihan', data: { teks: 'Dompet **' + c[0].nama + '** adalah dompet bawaan, jadi tidak bisa dihapus 🙂', sub: 'Kalau tidak dipakai, matikan saja tombol **Aktif** di Kelola dompet.', chips: [{ label: 'Buka Kelola dompet', aksi: 'buka', nilai: { halaman: 'dompet' } }] } });
+    }
+    if (c.length === 1) return Chat.dompetHapusTanya(c[0].id_dompet);
+    if (!bisa.length) return Chat.sistem('Belum ada dompet tambahan yang bisa dihapus 🙂 Dompet bawaan (Tunai, Rekening Bank, E-Wallet, Tabungan) bisa dinonaktifkan di Kelola dompet.');
+    const pilihan = c.length ? c.filter(S.bolehHapusDompet) : bisa;
+    return Chat.tambah({ kind: 'pilihan', data: { teks: t && !c.length ? 'Dompet “' + it.teks + '” tidak ketemu 🤔 Mau hapus yang mana?' : 'Dompet mana yang mau dihapus?',
+      chips: pilihan.slice(0, 8).map((d) => ({ label: (d.ikon || '💳') + ' ' + d.nama, aksi: 'dompetHapusPilih', nilai: { id: d.id_dompet } })).concat([{ label: 'Batal', aksi: 'tutup' }]) } });
+  };
+  Chat.dompetHapusTanya = function (id, saldoServer) {
+    const d = S.dompet(id);
+    if (!d) return Chat.sistem('Dompet itu sudah tidak ada 🙂');
+    const sisa = saldoServer !== undefined ? saldoServer : S.saldoGrupDompet(id);
+    const rpS = (v) => (v < 0 ? '\u2212' : '') + U.rp(v);
+    if (!sisa) {
+      return Chat.tambah({ kind: 'pilihan', data: { teks: 'Hapus dompet **' + (d.ikon || '') + ' ' + d.nama + '**?', sub: 'Riwayat transaksi lama tetap ada. Butuh internet.',
+        chips: [{ label: 'Hapus', aksi: 'dompetHapusYa', nilai: { id }, gaya: 'acc' }, { label: 'Batal', aksi: 'tutup' }] } });
+    }
+    const tujuan = S.master.dompet.filter((x) => x.aktif !== false && !x.dihapus && x.id_dompet !== id && !S.dompetKlon(x) && (!x.pemilik || S.modeSaldo() !== 'MASING'));
+    return Chat.tambah({ kind: 'pilihan', data: { teks: 'Dompet **' + d.nama + '** masih ada saldo **' + rpS(sisa) + '**. Sisa saldonya dipindah ke mana?', sub: 'Setelah dipindah, dompet dihapus. Riwayat transaksi lama tetap ada.',
+      chips: tujuan.slice(0, 8).map((x) => ({ label: (x.ikon || '💳') + ' ' + x.nama, aksi: 'dompetHapusYa', nilai: { id, tujuan: x.id_dompet } })).concat([{ label: 'Batal', aksi: 'tutup' }]) } });
   };
 
   // ---------- Salah ketik setengah yakin: "Maksudnya: ...?" ----------

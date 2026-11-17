@@ -128,7 +128,7 @@
   /** Judul transaksi untuk tampilan: pindah saldo dari nabung ditampilkan sebagai "Nabung" */
   S.judulTx = (t) => t.jenis === 'SALDO' ? 'Penyesuaian saldo' : t.jenis !== 'PINDAH' ? t.keterangan
     : /\b(me)?nabung\b/i.test(t.keterangan || '') ? 'Nabung'
-    : /^(kirim ke .+|pembagian saldo|gabung saldo)$/i.test(t.keterangan || '') ? U.huruf1(t.keterangan)
+    : /^(kirim ke .+|pembagian saldo|gabung saldo|sisa saldo .+)$/i.test(t.keterangan || '') ? U.huruf1(t.keterangan)
     : /^(tarik tunai|ambil tabungan|setor tunai|top up .+)$/i.test(t.keterangan || '') ? U.huruf1(t.keterangan) : 'Pindah saldo';
   S.kelasJenis = (j) => (j === 'MASUK' ? 't-in' : j === 'KELUAR' ? 't-out' : 't-tr');
   S.ikonTx = (t) => t.jenis === 'SALDO' ? '\u2696\ufe0f' : t.jenis === 'PINDAH' ? (S.judulTx(t) === 'Nabung' ? '\ud83d\udcb0' : /^kirim ke /i.test(t.keterangan || '') ? '\ud83e\udd1d' : '\ud83d\udd04') : S.kat(t.id_kategori).ikon;
@@ -437,10 +437,19 @@
     return out;
   };
 
-  S.saldoDompet = function () {
+  /** 1.0.33: dompet yang bisa dihapus (bukan bawaan, bukan salinan anggota, belum dihapus) */
+  S.DOMPET_BAWAAN = ['DMP-TUNAI', 'DMP-BANK', 'DMP-EWALLET', 'DMP-TABUNGAN'];
+  S.bolehHapusDompet = (d) => !!d && !d.dihapus && !S.dompetKlon(d) && S.DOMPET_BAWAAN.indexOf(d.id_dompet) < 0;
+  /** Saldo dompet beserta salinannya per anggota (dipakai saat menghapus dompet) */
+  S.saldoGrupDompet = function (id) {
+    const grup = S.master.dompet.filter((d) => d.id_dompet === id || String(d.id_dompet).split('~')[0] === id);
+    return S.hitungSaldo(grup).reduce((a, x) => a + x.saldo, 0);
+  };
+  S.saldoDompet = function () { return S.hitungSaldo(S.dompetTerlihat()); };
+  S.hitungSaldo = function (daftar) {
     const mulaiJendela = S.meta.jendelaMulai || '0000-00-00';
     const basis = S.meta.basisSaldo || {};
-    return S.dompetTerlihat().map((d) => {
+    return daftar.map((d) => {
       const batas = d.tanggal_saldo_awal && d.tanggal_saldo_awal > mulaiJendela ? d.tanggal_saldo_awal : mulaiJendela;
       let s = (Number(d.saldo_awal) || 0) + (Number(basis[d.id_dompet]) || 0);
       S.tx.forEach((t) => {

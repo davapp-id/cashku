@@ -486,12 +486,12 @@
       const saldo = Object.fromEntries(S.saldoDompet().map((x) => [x.dompet.id_dompet, x.saldo]));
       const adaTab = S.master.dompet.some((d) => d.tipe === 'TABUNGAN');
       el.querySelector('[data-body]').innerHTML = (!adaTab ? '<div class="banner amber" style="margin-bottom:12px">' + ic('triangle-alert') + '<span class="small">Dompet <b>Tabungan</b> belum ada di server. Tempel ulang <b>Kode.gs</b> versi terbaru di Apps Script, jalankan <b>migrasiData</b>, lalu buat <b>Versi baru</b> pada deployment.</span></div>' : '') + (navigator.onLine === false ? '<div class="banner amber" style="margin-bottom:12px">' + ic('cloud-off') + '<span class="small">Mengubah dompet perlu koneksi internet.</span></div>' : '') +
-        '<div class="list-group">' + S.master.dompet.filter((d) => !S.dompetKlon(d) || S.modeSaldo() === 'MASING').map((d) => '<button class="list-row" data-dmp="' + U.esc(d.id_dompet) + '"' + (d.aktif === false ? ' style="opacity:.5"' : '') + '><span class="ico-c">' + U.esc(d.ikon || '💳') + '</span><span class="grow"><b style="display:block;font-weight:600">' + U.esc(d.nama) + '</b><span class="small muted">' + ({ TUNAI: 'Tunai', REKENING: 'Rekening bank', EWALLET: 'E-wallet', TABUNGAN: 'Tabungan' })[d.tipe] + (d.pemilik ? ' · milik ' + U.esc(S.orang(d.pemilik).nama) : ' · keluarga') + '</span></span>' +
+        '<div class="list-group">' + S.master.dompet.filter((d) => !d.dihapus && (!S.dompetKlon(d) || S.modeSaldo() === 'MASING')).map((d) => '<button class="list-row" data-dmp="' + U.esc(d.id_dompet) + '"' + (d.aktif === false ? ' style="opacity:.5"' : '') + '><span class="ico-c">' + U.esc(d.ikon || '💳') + '</span><span class="grow"><b style="display:block;font-weight:600">' + U.esc(d.nama) + '</b><span class="small muted">' + ({ TUNAI: 'Tunai', REKENING: 'Rekening bank', EWALLET: 'E-wallet', TABUNGAN: 'Tabungan' })[d.tipe] + (d.pemilik ? ' · milik ' + U.esc(S.orang(d.pemilik).nama) : ' · keluarga') + '</span></span>' +
           (d.aktif === false ? '<span class="badge b-slate">Nonaktif</span>' : '<b class="num">' + U.rp(saldo[d.id_dompet] || 0) + '</b>') + ic('chevron-right', 'chev') + '</button>').join('') + '</div>' +
         '<div class="card" style="margin-top:16px;border:1px solid var(--danger-bg)"><div class="row" style="gap:12px;align-items:flex-start"><span class="ico-c sm" style="background:var(--danger-bg);color:var(--expense)">' + ic('refresh-cw', 'ic-sm') + '</span>' +
         '<span class="grow"><b style="display:block;font-weight:600">Atur ulang saldo</b><span class="small muted">Jadikan saldo dompet 0 (atau angka baru). Riwayat transaksi tetap ada. Bisa juga lewat chat: <b>reset saldo gopay</b>.</span>' +
         '<button class="btn sm danger" style="margin-top:10px" data-saldo-ulang>Atur ulang saldo…</button></span></div></div>' +
-        '<p class="help" style="margin-top:12px">Ketuk <b>+ Dompet</b> untuk menambah dompet, atau lewat chat: <b>tambah dompet rekening bri saldo 2jt</b>. Alias adalah kata yang dikenali di chat untuk dompet ini, misalnya “bri” atau “gopay”.</p>' +
+        '<p class="help" style="margin-top:12px">Ketuk <b>+ Dompet</b> untuk menambah dompet, atau lewat chat: <b>tambah dompet rekening bri saldo 2jt</b>. Dompet tambahan bisa dihapus: ketuk dompetnya lalu <b>Hapus dompet</b>, atau lewat chat: <b>hapus dompet rekening bri</b>. Alias adalah kata yang dikenali di chat untuk dompet ini, misalnya “bri” atau “gopay”.</p>' +
         '<p class="help">💰 <b>Tabungan</b> adalah uang yang disisihkan. Chat <b>nabung 1jt</b> masuk ke Tabungan, dan Tabungan tidak ditawarkan saat membayar kecuali disebut (<b>beli hp 3jt dari tabungan</b>). Matikan lewat tombol <b>Aktif</b> bila tidak dipakai.</p>';
     }
   });
@@ -583,6 +583,35 @@
     if (ok) await gantiMode({ mode: 'BERSAMA' });
   }
 
+  /** 1.0.33: hapus dompet tambahan. Sisa saldo dipindah ke dompet yang dipilih; riwayat transaksi tetap ada. */
+  async function hapusDompet(id) {
+    const d = S.dompet(id);
+    if (!S.bolehHapusDompet(d)) return false;
+    if (!(await siapOnline())) return false;
+    const sisa = S.saldoGrupDompet(id);
+    let tujuan = '';
+    if (sisa) {
+      const opsi = dasarDompet().filter((x) => x.id_dompet !== id).map((x) => ({ value: x.id_dompet, label: x.nama, ikon: x.ikon || '💳' }));
+      tujuan = await UI.Sheet.pilih({ judul: 'Sisa saldo ' + rpTanda(sisa) + ' dipindah ke…', opsi });
+      if (!tujuan) return false;
+    }
+    const ok = await UI.Sheet.konfirmasi({ judul: 'Hapus dompet ' + d.nama + '?', bahaya: true, ok: 'Hapus',
+      isiHtml: (sisa ? 'Sisa saldo <b>' + rpTanda(sisa) + '</b> dipindah ke <b>' + U.esc(S.dompet(tujuan).nama) + '</b>. ' : '') + 'Riwayat transaksi lama tetap ada.' });
+    if (!ok) return false;
+    let res = await panggilOnline('dompetHapus', { id, tujuan });
+    if (res && !res.success && res.data && res.data.code === 'PERLU_TUJUAN') {
+      // saldo berubah di HP lain sejak dihitung → pilih tujuan lalu ulangi
+      const t2 = await UI.Sheet.pilih({ judul: 'Sisa saldo ' + rpTanda(res.data.saldo || 0) + ' dipindah ke…', opsi: dasarDompet().filter((x) => x.id_dompet !== id).map((x) => ({ value: x.id_dompet, label: x.nama, ikon: x.ikon || '💳' })) });
+      if (!t2) return false;
+      res = await panggilOnline('dompetHapus', { id, tujuan: t2 });
+    }
+    if (!res || !res.success) return false;
+    UI.Router.segarkan();
+    UI.Toast.show('Dompet ' + d.nama + ' dihapus', 'success', res.data && res.data.transaksi ? 'Sisa saldo sudah dipindah.' : undefined);
+    return true;
+  }
+  g.HapusDompet = hapusDompet;
+
   function ubahDompet(id) {
     const d = id ? S.dompet(id) : { nama: '', tipe: 'EWALLET', pemilik: '', saldo_awal: 0, tanggal_saldo_awal: U.hariIni(), alias: '', aktif: true, ikon: '' };
     const st = Object.assign({}, d);
@@ -594,8 +623,11 @@
       '<label><span class="lbl">Per tanggal</span><input class="input" type="date" data-tgl value="' + U.esc(st.tanggal_saldo_awal || U.hariIni()) + '"></label></div>' +
       '<label class="field" style="margin-top:16px"><span class="lbl">Alias <span class="hint">pisahkan dengan koma</span></span><textarea class="input" data-alias placeholder="bri, brimo, rekening ayah">' + U.esc(st.alias || '') + '</textarea></label>' +
       (id ? '<label class="row" style="margin-top:16px"><span class="grow" style="font-weight:500">Aktif</span><span class="switch"><input type="checkbox" data-aktif' + (st.aktif !== false ? ' checked' : '') + '><i></i></span></label>' : '') +
-      '<div class="sheet-foot"><button class="btn block lg" data-simpan>Simpan</button></div>' });
+      '<div class="sheet-foot"><button class="btn block lg" data-simpan>Simpan</button>' +
+      (id && S.bolehHapusDompet(d) ? '<button class="btn block ghost" style="color:var(--expense)" data-hapus-dmp>' + ic('trash-2', 'ic-sm') + 'Hapus dompet</button>' : '') + '</div>' });
     const el = sh.el;
+    const bh = el.querySelector('[data-hapus-dmp]');
+    if (bh) bh.onclick = async () => { if (await hapusDompet(id)) sh.close(); };
     const gambar = () => {
       U.$$('[data-tipe] button', el).forEach((b) => b.classList.toggle('on', b.dataset.v === st.tipe));
       el.querySelector('[data-pem]').innerHTML = '<span class="v">' + U.esc(st.pemilik ? S.orang(st.pemilik).nama : 'Keluarga (bersama)') + '</span>' + ic('chevron-down');

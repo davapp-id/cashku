@@ -197,22 +197,29 @@
   };
 
   const IKON = ['🏷️', '🐾', '⚽', '🎁', '✈️', '💼', '🧒', '🛠️'];
+  /** 1.0.33: kategori dengan nama sama atau hampir sama ("Hewan Peliharan" ≈ "Hewan Peliharaan") */
+  const katMirip = (nama) => { const a = n(nama); if (!a) return null; return S.master.kategori.find((k) => k.aktif !== false && (n(k.nama) === a || (a.length >= 6 && P().lev(n(k.nama), a) <= (a.length >= 10 ? 2 : 1)))) || null; };
   ALUR.kategori = {
     judul: 'tambah kategori', perintah: 'tambah kategori',
     langkah: [
       { k: 'nama', tanya: () => ({ teks: 'Nama kategori barunya apa?', sub: 'Contoh: **Hewan Peliharaan**' }),
-        jawab: (t, d) => { const v = String(t).trim().slice(0, 40); if (v.length < 2) return 'Namanya terlalu pendek.'; if (S.master.kategori.some((k) => n(k.nama) === n(v))) return 'Kategori **' + v + '** sudah ada. Pakai nama lain, ya.'; d.nama = v.replace(/^./, (c) => c.toUpperCase()); } },
+        jawab: (t, d) => { const v = String(t).trim().replace(/^(?:kategori\s+)?(?:bernama|namanya|nama)\s+/i, '').slice(0, 40); if (v.length < 2) return 'Namanya terlalu pendek.'; const ada = katMirip(v); if (ada) return 'Kategori **' + ada.nama + '** sudah ada. Pakai nama lain, ya. Untuk menambah kata kuncinya, ketik **kata kunci ' + n(ada.nama) + '**.'; d.nama = v === v.toLowerCase() ? v.replace(/(^|\s)([a-z])/g, (x, a, c) => a + c.toUpperCase()) : v.replace(/^./, (c) => c.toUpperCase()); } },
       { k: 'jenis', tanya: (d) => ({ teks: '**' + d.nama + '** termasuk pengeluaran atau pemasukan?', chips: [{ label: 'Pengeluaran' }, { label: 'Pemasukan' }] }),
         jawab: (t, d) => { const o = pilih(t, [{ label: 'Pengeluaran', nilai: 'KELUAR', kata: ['keluar', 'belanja'] }, { label: 'Pemasukan', nilai: 'MASUK', kata: ['masuk', 'pendapatan', 'penghasilan'] }]); if (!o) return 'Pilih **Pengeluaran** atau **Pemasukan**.'; d.jenis = o.nilai; } },
       { k: 'ikon', opsional: '🏷️', tanya: (d) => ({ teks: 'Pilih ikon untuk **' + d.nama + '**:', sub: 'Atau ketik emoji sendiri.', chips: IKON.map((e) => ({ label: e })).concat([{ label: 'Lewati' }]) }),
         jawab: (t, d) => { const v = String(t).trim(); if (!/\p{Extended_Pictographic}/u.test(v) || v.length > 8) return 'Ketuk salah satu ikon, atau **Lewati**.'; d.ikon = v; } }
     ],
-    cek: (d) => (d.nama && S.master.kategori.some((k) => n(k.nama) === n(d.nama)) ? 'Kategori **' + d.nama + '** sudah ada 🙂' : ''),
-    ringkas: (d) => ({ teks: 'Tambah kategori ' + (d.jenis === 'MASUK' ? 'pemasukan' : 'pengeluaran') + ' **' + (d.ikon || '🏷️') + ' ' + d.nama + '**?', ya: 'Simpan' }),
+    cek: (d) => { const ada = d.nama && katMirip(d.nama); return ada ? 'Kategori **' + ada.ikon + ' ' + ada.nama + '** sudah ada 🙂 Mau tambah kata kuncinya? Ketik **kata kunci ' + n(ada.nama) + '**.' : ''; },
+    ringkas: (d) => ({ teks: 'Tambah kategori ' + (d.jenis === 'MASUK' ? 'pemasukan' : 'pengeluaran') + ' **' + (d.ikon || '🏷️') + ' ' + d.nama + '**?' + (d.kunci && d.kunci.length ? '\nKata kunci: ' + d.kunci.join(', ') : ''), ya: 'Simpan' }),
     async simpan(d) {
       const id = 'KAT-' + Date.now().toString(36).toUpperCase();
       await S.ubahMaster('kategori.put', { id_kategori: id, nama: d.nama, jenis: d.jenis, ikon: d.ikon || '🏷️', warna: g.Charts && g.Charts.PALET ? g.Charts.PALET[S.master.kategori.length % 10] : '#94A3B8', urutan: S.master.kategori.length + 1, aktif: true });
-      return { teks: 'Kategori **' + (d.ikon || '🏷️') + ' ' + d.nama + '** sudah ditambahkan ✅', sub: d.jenis === 'KELUAR' ? 'Mau kasih anggaran? Ketik misalnya **anggaran ' + n(d.nama) + ' 300rb**.' : '' };
+      const teks = 'Kategori **' + (d.ikon || '🏷️') + ' ' + d.nama + '** sudah ditambahkan ✅';
+      // 1.0.33: langsung tawarkan kata kunci (saran aplikasi + ketik sendiri)
+      return { setelah: async () => {
+        if (d.kunci && d.kunci.length) { await Chat().sistem(teks); await Chat().kunciSimpan(id, d.kunci, {}); return Chat().kunciTawar(id); }
+        return Chat().kunciTawar(id, { teks });
+      } };
     }
   };
   ALUR.ubahKategori = {
@@ -235,7 +242,7 @@
     judul: 'tambah dompet', perintah: 'tambah dompet',
     langkah: [
       { k: 'nama', tanya: () => ({ teks: 'Nama dompet barunya?', sub: 'Contoh: **BCA**, **GoPay**, **Celengan**' }),
-        jawab: (t, d) => { const v = String(t).trim().slice(0, 30); if (v.length < 2) return 'Namanya terlalu pendek.'; if (S.master.dompet.some((x) => n(x.nama) === n(v))) return 'Dompet **' + v + '** sudah ada.'; d.nama = v; const tp = P().tipeDompetDari(v); if (tp && !d.tipe) d.tipeSaran = tp; } },
+        jawab: (t, d) => { const v = String(t).trim().slice(0, 30); if (v.length < 2) return 'Namanya terlalu pendek.'; if (S.master.dompet.some((x) => !x.dihapus && n(x.nama) === n(v))) return 'Dompet **' + v + '** sudah ada.'; d.nama = v; const tp = P().tipeDompetDari(v); if (tp && !d.tipe) d.tipeSaran = tp; } },
       { k: 'tipe', tanya: (d) => ({ teks: '**' + d.nama + '** termasuk jenis apa?', chips: Object.keys(TIPE).map((k) => ({ label: TIPE[k] })) }),
         jawab: (t, d) => { const o = pilih(t, Object.keys(TIPE).map((k) => ({ label: TIPE[k], nilai: k, kata: { REKENING: ['bank', 'rek'], EWALLET: ['ewallet', 'dompet digital'], TUNAI: ['cash', 'uang tunai'], TABUNGAN: ['celengan'] }[k] }))); if (!o) return 'Pilih: Rekening, E-Wallet, Tunai, atau Tabungan.'; d.tipe = o.nilai; } },
       { k: 'saldo', opsional: 0, tanya: (d) => ({ teks: 'Saldo **' + d.nama + '** sekarang berapa?', sub: 'Contoh: **1,2jt**. Ketuk **Lewati** bila mulai dari Rp0.', chips: [{ label: 'Lewati' }] }),
@@ -292,7 +299,7 @@
       sub: 'Kalau perlu perubahan, minta tolong ' + namaAdmin() + ' ya.' } });
   }
   Atur.menu = function () {
-    const chips = ['Tambah akun', 'Ubah akun', 'Nonaktifkan akun', 'Atur anggaran', 'Tambah kategori', 'Ganti nama kategori', 'Tambah dompet', 'Target tabungan']
+    const chips = ['Tambah akun', 'Ubah akun', 'Nonaktifkan akun', 'Atur anggaran', 'Tambah kategori', 'Tambah kata kunci', 'Ganti nama kategori', 'Tambah dompet', 'Hapus dompet', 'Target tabungan']
       .map((x) => ({ label: x, aksi: 'kirim', nilai: { teks: x.toLowerCase() } }));
     return Chat().tambah({ kind: 'pilihan', data: { teks: 'Ini yang bisa diatur lewat chat ⚙️', sub: admin() ? 'Ketuk salah satu, atau ketik langsung, misalnya **anggaran jajan 500rb** atau **tambah akun Bunda istri**.' : 'Perubahan ini hanya bisa dilakukan Admin (' + namaAdmin() + ').',
       chips: admin() ? chips.concat([{ label: 'Buka halaman Pengaturan', aksi: 'buka', nilai: { halaman: 'atur' }, gaya: 'ghost' }]) : [{ label: 'Buka halaman Pengaturan', aksi: 'buka', nilai: { halaman: 'atur' } }] } });
@@ -361,6 +368,7 @@
         const r = await a.simpan(d);
         if (r.ulang) { await Chat().tambah({ kind: 'pilihan', data: { teks: r.ulang, chips: [{ label: a.ringkas(d).ya || 'Simpan', aksi: 'sesi', nilai: { teks: 'ya', sesi: sesi.id }, gaya: 'acc' }, { label: 'Batal', aksi: 'sesi', nilai: { teks: 'batal', sesi: sesi.id } }], sesi: sesi.id } }); return true; }
         sesi = null; clearTimeout(timer);
+        if (r.setelah) { await r.setelah(); return true; }
         await Chat().tambah({ kind: 'pilihan', data: { teks: r.teks, sub: r.sub || '', chips: r.chips || [] } });
         return true;
       }

@@ -24,7 +24,7 @@ const SETUP = {
 
 const APP = {
   NAMA: 'CashKu',
-  VERSI: '1.0.32',
+  VERSI: '1.0.33',
   TZ: 'Asia/Makassar',
   TOKEN_HARI: 30,           // masa berlaku sesi
   JENDELA_BULAN: 24,        // transaksi yang disimpan di HP
@@ -146,6 +146,7 @@ const ROUTES = {
   penggunaSimpan:  { auth: 'ADMIN', fn: apiPenggunaSimpan_, write: true },
   penggunaReset:   { auth: 'ADMIN', fn: apiPenggunaReset_, write: true },
   dompetSimpan:    { auth: 'ADMIN', fn: apiDompetSimpan_, write: true },
+  dompetHapus:     { auth: 'ADMIN', fn: apiDompetHapus_, write: true },
   pengaturanSimpan:{ auth: 'ADMIN', fn: apiPengaturanSimpan_, write: true },
   modeSaldo:       { auth: 'ADMIN', fn: apiModeSaldo_, write: true },
   dompetAnggota:   { auth: 'ADMIN', fn: apiDompetAnggota_, write: true },
@@ -392,7 +393,7 @@ function buildMaster_(user) {
       kamus: tableObjects_(SHEET.kamus).filter(function (k) { return truthy_(k.aktif); })
         .map(function (k) { return { id_kamus: k.id_kamus, frasa: k.frasa, tipe: k.tipe, target: k.target, sumber: k.sumber }; }),
       dompet: tableObjects_(SHEET.dompet).map(function (d) {
-        d.saldo_awal = Number(d.saldo_awal) || 0; d.aktif = truthy_(d.aktif); d.tanggal_saldo_awal = tgl_(d.tanggal_saldo_awal); return d;
+        d.saldo_awal = Number(d.saldo_awal) || 0; if (dompetDihapus_(d.aktif)) d.dihapus = true; d.aktif = truthy_(d.aktif); d.tanggal_saldo_awal = tgl_(d.tanggal_saldo_awal); return d;
       }),
       anggaran: tableObjects_(SHEET.anggaran).map(function (a) {
         a.batas = Number(a.batas) || 0; a.ambang_peringatan = Number(a.ambang_peringatan) || 80; a.aktif = truthy_(a.aktif); return a;
@@ -935,6 +936,63 @@ function apiDompetSimpan_(ctx, d) {
   bumpMaster_();
   logAturLangsung_(ctx.user, 'DOMPET', (i > -1 ? 'ubah ' : 'tambah ') + obj.nama + ' (' + tipe + ', saldo awal ' + rupiah_(obj.saldo_awal) + ')' + (truthy_(obj.aktif) ? '' : ' (nonaktif)'));
   return ok_({ pesan: 'Dompet disimpan.', id_dompet: obj.id_dompet });
+}
+
+/** 1.0.33: hapus dompet tambahan. Dompet bawaan tidak bisa dihapus (bisa dinonaktifkan).
+ *  Belum ada transaksi → dihapus permanen. Sudah ada transaksi → sisa saldo dipindah ke dompet tujuan (transaksi PINDAH),
+ *  lalu dompet ditandai DIHAPUS: hilang dari daftar, riwayat transaksi lama tetap bisa dibaca. Salinan per anggota ikut. */
+const DOMPET_BAWAAN = ['DMP-TUNAI', 'DMP-BANK', 'DMP-EWALLET', 'DMP-TABUNGAN'];
+function dompetDihapus_(v) { return String(v).toUpperCase() === 'DIHAPUS'; }
+function apiDompetHapus_(ctx, d) {
+  const id = String((d && d.id) || '');
+  if (!id || id.indexOf('~') > -1) return fail_('Dompet tidak dikenal.');
+  if (DOMPET_BAWAAN.indexOf(id) > -1) return fail_('Dompet bawaan tidak bisa dihapus. Matikan saja tombol Aktif bila tidak dipakai.');
+  const td = readTable_(SHEET.dompet);
+  const idOf = function (r) { return String(r[td.col.id_dompet]); };
+  const utama = td.rows.find(function (r) { return idOf(r) === id; });
+  if (!utama || dompetDihapus_(utama[td.col.aktif])) return fail_('Dompet sudah tidak ada.');
+  const nama = String(utama[td.col.nama]);
+  const grup = td.rows.filter(function (r) { return idOf(r) === id || idOf(r).split('~')[0] === id; }).map(idOf);
+  const saldo = saldoServer_();
+  const sisa = grup.filter(function (x) { return Math.round(saldo[x] || 0) !== 0; });
+  const tt = readTable_(SHEET.transaksi);
+  const adaTx = tt.rows.some(function (r) { const o = rowToTx_(tt, r); return o.status === 'AKTIF' && (grup.indexOf(o.id_dompet) > -1 || grup.indexOf(o.id_dompet_tujuan) > -1); });
+  const tujuan = String(d.tujuan || '');
+  if (sisa.length) {
+    const rt = td.rows.find(function (r) { return idOf(r) === tujuan; });
+    if (!tujuan || !rt || grup.indexOf(tujuan) > -1 || !truthy_(rt[td.col.aktif])) {
+      return fail_('Pilih dompet untuk menampung sisa saldo ' + nama + '.', { code: 'PERLU_TUJUAN', saldo: grup.reduce(function (a, x) { return a + Math.round(saldo[x] || 0); }, 0) });
+    }
+  }
+  const now = Date.now(), hari = tglStr_(new Date()), waktu = iso_(new Date()), batch = 'HAPUS-' + now.toString(36).toUpperCase();
+  const uid = ctx.user.id, kode = String(uid).replace(/^USR-/, '');
+  const txs = [];
+  let n = 0;
+  sisa.forEach(function (x) {
+    const v = Math.round(saldo[x] || 0);
+    const pem = x.indexOf('~') > -1 ? x.split('~')[1] : '';
+    const rk = pem ? td.rows.find(function (r) { return idOf(r) === tujuan + '~' + pem && truthy_(r[td.col.aktif]); }) : null;
+    const ke = rk ? idOf(rk) : tujuan;
+    txs.push(txToRow_({ id_transaksi: 'TRX-' + hari.replace(/-/g, '') + '-' + kode + '-H' + now.toString(36).slice(-4).toUpperCase() + (++n),
+      id_batch: batch, waktu_catat: waktu, tanggal_transaksi: hari, id_pengguna: pem || uid, jenis: 'PINDAH', nominal: Math.abs(v), keterangan: 'Sisa saldo ' + nama,
+      id_kategori: '', id_dompet: v > 0 ? x : ke, id_dompet_tujuan: v > 0 ? ke : x, teks_asli: '', sumber: 'HAPUS_DOMPET', status: 'AKTIF', diubah_oleh: uid, diubah_pada: waktu }, 1, now));
+  });
+  const permanen = !adaTx && !txs.length;
+  if (permanen) td.rows = td.rows.filter(function (r) { return grup.indexOf(idOf(r)) < 0; });
+  else td.rows.forEach(function (r) { if (grup.indexOf(idOf(r)) > -1) { r[td.col.aktif] = 'DIHAPUS'; if (td.col.diterima_server !== undefined) r[td.col.diterima_server] = now; } });
+  td.dirty = true;
+  writeTable_(td);
+  if (txs.length) appendRows_(SHEET.transaksi, txs);
+  // dompet default anggota yang dihapus → kembali ke pilihan bawaan
+  const tp = readTable_(SHEET.pengguna);
+  if (tp.col.id_dompet_default !== undefined) {
+    let ub = false;
+    tp.rows.forEach(function (r) { if (grup.indexOf(String(r[tp.col.id_dompet_default])) > -1) { r[tp.col.id_dompet_default] = ''; ub = true; } });
+    if (ub) { tp.dirty = true; writeTable_(tp); }
+  }
+  bumpMaster_();
+  logAturLangsung_(ctx.user, 'DOMPET', 'hapus ' + nama + (txs.length ? ' (sisa saldo dipindah)' : ''));
+  return ok_({ pesan: 'Dompet ' + nama + ' dihapus.', permanen: permanen, transaksi: txs.length });
 }
 
 function apiPengaturanSimpan_(ctx, d) {

@@ -203,7 +203,14 @@
       if (d.aktif === false) return;
       idx0Nama[d.id_dompet] = d.nama;
       const fr = [d.nama].concat(String(d.alias || '').split(',')).map((x) => normal(x)).filter((x) => x && KATA_QRIS.indexOf(x) < 0);
-      Array.from(new Set(fr)).forEach((f) => dompet.push({ frasa: f, id: d.id_dompet, tipe: d.tipe }));
+      Array.from(new Set(fr)).forEach((f) => dompet.push({ frasa: f, id: d.id_dompet, tipe: d.tipe, nama: f === normal(d.nama) }));
+      // 1.0.33: "rek saudara" = "rekening saudara", "ewallet ayah" = "e-wallet ayah"
+      const nm = normal(d.nama), vr = [];
+      let mm;
+      if ((mm = /^rekening\s+(.+)$/.exec(nm))) vr.push('rek ' + mm[1], 'rekening ' + mm[1] + 'nya');
+      if ((mm = /^rek\s+(.+)$/.exec(nm))) vr.push('rekening ' + mm[1]);
+      if ((mm = /^e-?wallet\s+(.+)$/.exec(nm))) vr.push('ewallet ' + mm[1], 'e-wallet ' + mm[1], 'e wallet ' + mm[1]);
+      vr.forEach((f) => { if (fr.indexOf(f) < 0) dompet.push({ frasa: f, id: d.id_dompet, tipe: d.tipe, nama: true }); });
     });
     // 1.0.31: alias yang menjadi bagian nama dompet lain diserahkan ke dompet itu ("bca" → "Rekening BCA", bukan "Rekening Bank")
     const kataNama = {};
@@ -223,7 +230,7 @@
       if (!m || semuaKataTipe.indexOf(m[1]) > -1 || dompet.some((e) => e.frasa === m[1])) return;
       (pendek[m[1]] = pendek[m[1]] || []).push(d);
     });
-    Object.keys(pendek).forEach((f) => { if (pendek[f].length === 1) dompet.push({ frasa: f, id: pendek[f][0].id_dompet, tipe: pendek[f][0].tipe }); });
+    Object.keys(pendek).forEach((f) => { if (pendek[f].length === 1) dompet.push({ frasa: f, id: pendek[f][0].id_dompet, tipe: pendek[f][0].tipe, nama: true }); });
     // Kata umum per jenis dompet ("kas", "rek", "bank", "dompet digital"...). Bila jenisnya punya >1 dompet → ditanyakan.
     const sudah = new Set(dompet.map((e) => e.frasa));
     const idsTipe = (tp) => ctx.dompet.filter((d) => d.aktif !== false && d.tipe === tp).map((d) => d.id_dompet);
@@ -272,8 +279,14 @@
     const typo = {};
     (ctx.typo || []).forEach((x) => { const a = normal(x.salah), b = normal(x.benar); if (a && b && a !== b) { typo[a] = b; b.split(' ').forEach((w) => known.add(w)); } });
     const vocab = Array.from(known).filter((w) => /^[a-z]{2,}$/.test(w));
+    // 1.0.33: kata dari nama dompet, nama kategori, dan kata kunci buatan pengguna didahulukan saat membetulkan salah ketik
+    const prioritas = new Set();
+    const tambahP = (s) => normal(s).split(/[^a-z]+/).forEach((w) => { if (w.length >= 4) prioritas.add(w); });
+    dompet.forEach((e) => tambahP(e.frasa));
+    Object.values(katAktif).forEach((k) => tambahP(k.nama));
+    kat.forEach((e) => { if (e.sumber && e.sumber !== 'BAWAAN') tambahP(e.frasa); });
     const ganda = KATA_GANDA.map((x) => ({ kata: x.kata, tanya: x.tanya, opsi: x.opsi.filter((o) => katAktif[o.kat] && katAktif[o.kat].jenis === 'KELUAR') }));
-    IDX = { kat, masuk, pindah, dompet, anggota, kirimAnggota, katAktif, known, ganda, typo, vocab, dompetById: Object.fromEntries(ctx.dompet.map((d) => [d.id_dompet, d])) };
+    IDX = { kat, masuk, pindah, dompet, anggota, kirimAnggota, katAktif, known, ganda, typo, vocab, prioritas, dompetById: Object.fromEntries(ctx.dompet.map((d) => [d.id_dompet, d])) };
     IDX_KEY = key;
     return IDX;
   }
@@ -666,6 +679,8 @@
     return w.join(' ').trim();
   }
 
+  // 1.0.33: kata kerja pindah saldo yang boleh langsung diikuti nama dompet (tanpa "ke")
+  const RE_VERBA_DOMPET = /(?:^|\s)(transfer|tranfer|trasfer|trf|tf|transferin|tfin|kirim|kirimin|kirimkan|ngirim|isi|isiin|top up|topup|top-up|pindah|pindahin|pindahkan|mindahin|setor|masukin|masukkan|tambah saldo|tambahin)(?:\s+(?:saldo|uang|duit|dana|buat|untuk|utk|bwt|lagi|aja|saja|dong|ya|sebesar))*\s+$/;
   // 1.0.29: kirim uang ke anggota keluarga. Kata kerja kirim harus ada sebelum nama/panggilan anggota.
   const RE_KIRIM_ANGGOTA = /(?:^|\s)(transfer|tranfer|trasfer|trf|tf|transferin|tfin|kirim|kirimin|ngirim|kirimkan|kasih|kasi|ngasih|kasihkan|beri|berikan|ngasi|bagi|bagiin|uang jajan|uang saku|uang belanja|uang bulanan|jatah|nafkah)(?:\s+(?:ke|buat|untuk|utk|bwt|sama|ama|kepada|pada|si|uang|duit|dana|saldo|jajan|belanja|saku|bulanan))*\s*$/;
   function cariKirimAnggota(text, idx, ctx) {
@@ -763,6 +778,27 @@
       const v = /\b(kirim|kirimin|kirimkan|transfer|transferin|tf|trf|pindah|pindahin|pindahkan)\b/.exec(tanpaNominal);
       if (hDari && hKe && v) pindahM = { index: v.index, len: v[0].length, frasa: v[1] };
     }
+    // 1.0.33: "tf rek saudara 50rb", "kirim rekening bca 1jt", "isi saudara 100rb" — kata kerja langsung diikuti NAMA dompet (tanpa "ke")
+    let verbaDompet = null;
+    if (!pindahM && ctx.fiturDompet && dompetHits.length) {
+      for (const hh of dompetHits) {
+        if (!hh.nama) continue;
+        const depan = tanpaNominal.slice(0, hh.index);
+        const v = RE_VERBA_DOMPET.exec(depan);
+        if (!v) continue;
+        if (/\b(dapat|dapet|terima|menerima|diterima|dikirimi|dikasih)\s+$/.test(depan.slice(0, v.index + 1) + ' ')) continue;
+        const kerja = v[1];
+        const dk0 = idx.dompetById[hh.id] || {};
+        // "kirim tunai 50rb" bisa berarti memberi uang tunai ke orang lain → tetap pengeluaran
+        if (dk0.tipe === 'TUNAI' && /^(kirim|kirimin|kirimkan|ngirim|transfer|tranfer|trasfer|trf|tf|transferin|tfin)$/.test(kerja)) continue;
+        // kata kerjanya sendiri alias dompet yang sama ("tf rekening bank") → tetap seperti biasa
+        const vHit = dompetHits.find((x) => x.index === v.index + v[0].indexOf(kerja) && x.id === hh.id);
+        if (vHit) continue;
+        verbaDompet = { kerja, hit: hh };
+        pindahM = { index: v.index + v[0].indexOf(kerja), len: kerja.length, frasa: kerja };
+        break;
+      }
+    }
     const awalKeluar = /^(beli|bayar|bayarin|membeli|membayar|kasih|kirim|transfer ke)\b/.test(tanpaNominal.trim());
     let masukM = null;
     if (!awalKeluar) for (const e of idx.masuk) { const h = cari(tanpaNominal, e.frasa); if (h) { masukM = h; break; } }
@@ -791,9 +827,11 @@
       }
       const dk = (id) => idx.dompetById[id];
       const tipe = (tp) => ctx.dompet.filter((x) => x.aktif !== false && x.tipe === tp).map((x) => x.id_dompet);
-      let tujuan = null, sumber = null;
+      let tujuan = verbaDompet ? verbaDompet.hit.id : null, sumber = null;
       const f = pindahM.frasa;
       const nabung = /nabung/.test(f);
+      // 1.0.33: "isi saldo rek saudara" — dompet tepat sesudah penanda isi/top up = tujuan
+      if (!tujuan && /^(isi|top)/.test(f)) { const hx = dompetHits.find((hh) => hh.index >= pindahM.index + pindahM.len && hh.index <= pindahM.index + pindahM.len + 2); if (hx) tujuan = hx.id; }
       // Dompet yang namanya bagian dari penanda ("ambil tabungan", "isi rekening") tetap dihitung
       dompetHits.forEach((hh) => {
         const prep = kataSebelum(tanpaNominal, hh.index);
@@ -824,6 +862,11 @@
           tujuan = sesudah ? sesudah.id : (sisa[0] || null);
         }
         if (!sumber) sumber = dompetHits.map((hh) => hh.id).find((id) => id !== tujuan) || null;
+        // 1.0.33: "tf/kirim rek saudara" tanpa asal: rekening lain satu-satunya dipakai sebagai asal; bila lebih dari satu → ditanyakan
+        if (!sumber && verbaDompet && /^(transfer|tranfer|trasfer|trf|tf|transferin|tfin|kirim|kirimin|kirimkan|ngirim)$/.test(verbaDompet.kerja)) {
+          const rek = tipe('REKENING').filter((id) => id !== tujuan);
+          sumber = rek.length === 1 ? rek[0] : null;
+        }
       }
       d.id_dompet = sumber; d.id_dompet_tujuan = tujuan;
       d.sumberDitanya = !sumber;
@@ -837,7 +880,7 @@
       const nm = (id) => (dk(id) ? dk(id).nama : '');
       const verba = /^(isi|top up|topup|top-up|pindah dana|transfer dana|dana|pindah|pindahin|pindahkan|mindahin|memindahkan|dipindah|kirim|tf|transfer|tarik|ambil|ambil uang|tarik uang|setor|bongkar|masukin|masukkan|simpan|nabung|menabung|pindah uang|pindah saldo)$/;
       let label = ketP;
-      if (!label || verba.test(label)) {
+      if (!label || verba.test(label) || verba.test(label.replace(/\s+(uang|duit|dana|saldo)$/, ''))) {
         const tpS = sumber && dk(sumber) ? dk(sumber).tipe : '', tpT = tujuan && dk(tujuan) ? dk(tujuan).tipe : '';
         label = nabung || tpT === 'TABUNGAN' ? 'Nabung' : tpS === 'TABUNGAN' ? 'Ambil tabungan' : /setor/.test(f) ? 'Setor tunai'
           : /tarik|ambil/.test(f) && tpT === 'TUNAI' ? 'Tarik tunai' : /^(isi|top)/.test(f) && tujuan ? 'Top up ' + nm(tujuan) : 'Pindah saldo';
@@ -970,7 +1013,7 @@
   }
 
   /** Nama kategori dari teks bebas ("bulanan", "tagihan", "transport") → daftar id */
-  function cariKategoriNama(s, ctx) {
+  function cariKategoriNama(s, ctx, namaSaja) {
     const idx = siapkan(ctx);
     s = normal(s).replace(/["“”']/g, '').replace(/^(kategori|ke|jadi|dalam)\s+/, '').replace(/(\s+(ya|yah|dong|aja|saja|selalu|terus|kategori|nya|deh|ok|oke))+$/, '').trim();
     if (!s) return [];
@@ -981,6 +1024,10 @@
     const ws = s.replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length >= 3 && !/^(dan|yang|untuk|buat)$/.test(w));
     r = aktif.filter((k) => ws.length && ws.every((w) => nk(k).split(' ').some((x) => x === w || (w.length >= 4 && x.indexOf(w) === 0) || (w.length >= 5 && lev(x, w) <= (w.length >= 7 ? 2 : 1)))));
     if (r.length) return r.map((k) => k.id_kategori);
+    // 1.0.33: salah ketik ringan pada nama kategori ("hewn", "peliharan", "pndidikan")
+    r = aktif.filter((k) => ws.length && ws.every((w) => nk(k).split(' ').some((x) => x[0] === w[0] && (vokalHilang(w, x) || (w.length >= 4 && osa(w, x) <= 1) || (w.length >= 7 && osa(w, x) <= 2)))));
+    if (r.length) return r.map((k) => k.id_kategori);
+    if (namaSaja) return [];
     return Array.from(new Set(idx.kat.filter((e) => e.frasa === s).map((e) => e.target)));
   }
 
@@ -1156,13 +1203,18 @@
       let best = null, second = null;
       for (const c of idx.vocab) {
         if (Math.abs(c.length - w.length) > 3) continue;
-        const sk = skorKandidat(w, c, awal && lanjut && VERBA_SET.has(c));
+        let sk = skorKandidat(w, c, awal && lanjut && VERBA_SET.has(c));
+        // kata nama dompet/kategori/kata kunci pengguna: huruf diganti juga dibetulkan ("pakam kucing" → "pakan kucing")
+        if (sk > 0 && sk < 0.8 && idx.prioritas && idx.prioritas.has(c) && w.length >= 5 && osa(w, c) === 1) sk = 0.8;
         if (sk <= 0) continue;
         if (!best || sk > best.s) { second = best; best = { c, s: sk }; } else if (!second || sk > second.s) second = { c, s: sk };
       }
       if (!best) return w;
+      // sama kuat: kata prioritas (nama dompet/kategori/kata kunci pengguna) didahulukan — "pkan" → "pakan", bukan "pekan"
+      if (second && second.s >= best.s - 0.05 && idx.prioritas && idx.prioritas.has(second.c) && !idx.prioritas.has(best.c)) { const x = best; best = second; second = x; }
       let sk = best.s;
-      if (second && second.s >= sk - 0.05) sk -= 0.15;                     // dua kandidat sama kuat → kurang yakin
+      const utama = idx.prioritas && idx.prioritas.has(best.c);
+      if (second && second.s >= sk - 0.05 && !(utama && !idx.prioritas.has(second.c))) sk -= 0.15;   // dua kandidat sama kuat → kurang yakin
       if (sk >= at.typo_ambang_yakin) { yakin.push({ dari: w, ke: best.c, skor: +sk.toFixed(2) }); return best.c; }
       if (sk >= at.typo_ambang_ragu) ragu.push({ dari: w, ke: best.c, skor: +sk.toFixed(2), i });
       return w;
@@ -1487,6 +1539,216 @@
     if ((m = /\b(20\d\d)\b/.exec(t))) { const y = Number(m[1]); return { tanggal: y + '-12-31', bulan: Math.max(1, jarak(y, 12)) }; }
     return null;
   }
+  // =============================================================
+  // 1.0.33 — Tambah kategori & kata kunci lewat chat (luwes, boleh salah ketik)
+  // =============================================================
+  const LEKS_PASTI = { tolong: ['tolong', 'tlg', 'coba', 'mau', 'saya', 'aku', 'pengen', 'ingin', 'minta', 'bisa', 'bisakah', 'dong'], kata: ['kata', 'kta', 'kt'], baru: ['baru', 'br', 'lagi'] };
+  const LEKS_MIRIP = {
+    tambah: ['tambah', 'tambahkan', 'tambahin', 'tmbh', 'tmbah', 'tambh', 'buat', 'buatkan', 'buatin', 'bwt', 'bikin', 'bikinin', 'bikinkan', 'bkin', 'masukkan', 'masukin', 'daftarkan', 'daftarin', 'input', 'add', 'ajarkan', 'ajarin'],
+    kategori: ['kategori', 'kategory', 'category', 'katagori', 'kategorinya', 'ktgr', 'ktgri', 'ktg', 'kat'],
+    kunci: ['kunci', 'kuncinya', 'kunci2', 'kuci', 'kunc', 'knci', 'kumci'],
+    keyword: ['keyword', 'keywords', 'kamus', 'kamusnya', 'kosakata', 'katakunci']
+  };
+  function miripPerintah(w, c) {
+    if (w === c) return true;
+    if (c.length < 4 || w.length < 3 || w[0] !== c[0]) return false;
+    return vokalHilang(w, c) || (w.length >= 4 && osa(w, c) <= 1) || (w.length >= 7 && osa(w, c) <= 2);
+  }
+  function kelasKata(w) {
+    w = String(w || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!w) return '';
+    for (const k of Object.keys(LEKS_PASTI)) if (LEKS_PASTI[k].indexOf(w) > -1) return k;
+    for (const k of Object.keys(LEKS_MIRIP)) if (LEKS_MIRIP[k].indexOf(w) > -1) return k;
+    if (/^\d/.test(w)) return '';
+    if (w.length < 5) return '';
+    for (const k of Object.keys(LEKS_MIRIP)) if (LEKS_MIRIP[k].some((c) => c.length >= 5 && miripPerintah(w, c))) return k;
+    return '';
+  }
+  const PISAH_KATA = /\s*(?:,|;|\/|\n|\s+dan\s+|\s+serta\s+|\s+&\s+|\s+sama\s+)\s*/;
+  function daftarKata(s) {
+    return String(s || '').split(PISAH_KATA).map((x) => normal(x).replace(/["“”'`*]/g, '').replace(/^(?:kata\s+|yang\s+)/, '').replace(/(?:\s+(?:ya|yah|dong|aja|saja|deh|juga))+$/, '').replace(/[.!?:]+$/, '').trim())
+      .filter((x) => x && x.length >= 2 && x.split(' ').length <= 5);
+  }
+  /** "pakan kucing, vaksin ke hewan peliharaan" → { kata: [...], katTeks, kandidat } */
+  function pisahKunciKategori(rest, ctx, utamakanKategori) {
+    let s = String(rest || '').trim().replace(/^[:\-–]+\s*/, '');
+    const hasil = { kata: [], katTeks: '', kandidat: [] };
+    if (!s) return hasil;
+    const katDari = (x) => cariKategoriNama(x.replace(/^(?:ke\s+|dalam\s+|di\s+)?(?:kategori\s+)?/i, ''), ctx, true);
+    // "untuk hewan peliharaan: pakan, vaksin" / "hewan peliharaan: pakan, vaksin"
+    let m = /^(.+?)\s*:\s*(.+)$/.exec(s);
+    if (m) {
+      const kiri = m[1].replace(/^(?:untuk|buat|utk|bwt|ke|di|kategori)\s+(?:kategori\s+)?/i, '');
+      const k = katDari(kiri);
+      if (k.length) return { kata: daftarKata(m[2]), katTeks: kiri, kandidat: k };
+      s = m[1] + ' ' + m[2];
+    }
+    // "... ke/untuk/masuk (kategori) K" — dipakai bila K memang nama kategori atau kata "kategori" disebut
+    const re = /\s+(?:ke|di|untuk|buat|utk|bwt|masuk|masukkan|pada|dalam|pd)\s+(?:ke\s+|dalam\s+)?(kategori\s+)?(.+)$|\s+(kategori)\s+(.+)$/i;
+    m = re.exec(' ' + s);
+    if (m) {
+      const kTeks = (m[2] || m[4] || '').trim(), tegas = !!(m[1] || m[3]);
+      const k = katDari(kTeks);
+      const kiri = (' ' + s).slice(0, m.index).trim();
+      if (k.length || (tegas && kiri)) return { kata: daftarKata(kiri), katTeks: kTeks, kandidat: k };
+    }
+    // "untuk kategori hewan" saja → kategori tanpa kata
+    m = /^(?:untuk|buat|utk|bwt|ke|di)?\s*(?:kategori\s+)?(.+)$/i.exec(s);
+    const kSemua = m ? katDari(m[1]) : [];
+    if (kSemua.length && (utamakanKategori || /^(?:untuk|buat|utk|bwt|ke|di|kategori)\s/i.test(s) || cariKategoriNama(m[1], ctx, true).some((id) => normal((ctx.kategori.find((k) => k.id_kategori === id) || {}).nama || '') === normal(m[1])))) {
+      return { kata: [], katTeks: m[1], kandidat: kSemua };
+    }
+    hasil.kata = daftarKata(s);
+    return hasil;
+  }
+  function jenisKategoriDari(w) {
+    w = normal(w);
+    if (['pemasukan', 'pendapatan', 'penghasilan', 'masuk', 'income'].some((c) => miripPerintah(w, c))) return 'MASUK';
+    if (['pengeluaran', 'keluar', 'belanja', 'biaya'].some((c) => miripPerintah(w, c))) return 'KELUAR';
+    return '';
+  }
+  function kategoriKunciDari(t0, raw, ctx) {
+    if (cariNominal(tutupBukanNominal(t0)).some((a) => a.kuat)) return null;
+    const rawRapi = String(raw).trim().replace(/\s+/g, ' ');
+    const w = rawRapi.split(' ');
+    const kls = w.map(kelasKata);
+    let i = 0;
+    while (i < 2 && kls[i] === 'tolong') i++;
+    const sisa = (j) => w.slice(j).join(' ').replace(/^[:\-–]+\s*/, '').trim();
+    let m;
+    // ---- Kategori baru: "tambah kategori hewan", "tambh katgori baru hewan", "kategori baru: hewan" ----
+    let j = -1;
+    if (kls[i] === 'tambah' && kls[i + 1] === 'kategori') j = i + 2;
+    else if (kls[i] === 'tambah' && kls[i + 1] === 'baru' && kls[i + 2] === 'kategori') j = i + 3;
+    else if (kls[i] === 'kategori' && kls[i + 1] === 'baru') j = i + 2;
+    if (j > -1 && !(kls[j] === 'kata' && kls[j + 1] === 'kunci') && kls[j] !== 'keyword' && kls[j] !== 'kunci') {
+      if (kls[j] === 'baru') j++;
+      let rest = sisa(j).replace(/^(?:yang\s+)?(?:bernama|namanya|nama|untuk|yaitu|yakni)\s+/i, '').replace(/(?:\s+(?:ya|dong|deh|aja|saja))+$/i, '');
+      const data = {};
+      // "... dengan kata kunci pakan, vaksin"
+      const rw = rest.split(' '), rk = rw.map(kelasKata);
+      for (let x = 0; x < rw.length; x++) {
+        if (rk[x] === 'keyword' || (rk[x] === 'kata' && rk[x + 1] === 'kunci')) {
+          const kata = daftarKata(rw.slice(x + (rk[x] === 'kata' ? 2 : 1)).join(' ').replace(/^(?:nya|-nya)?\s*:?\s*/, ''));
+          if (kata.length) data.kunci = kata;
+          rest = rw.slice(0, x).join(' ').replace(/\s+(?:dengan|pakai|plus|dan)$/i, '').trim();
+          break;
+        }
+      }
+      // jenis: "pemasukan" / "pengeluaran" (boleh salah ketik)
+      const rw2 = rest.split(' ').filter(Boolean);
+      const sisaNama = [];
+      rw2.forEach((x, k) => {
+        const jn = jenisKategoriDari(x);
+        const sambung = /^(untuk|jenis|kategori|sebagai|termasuk)$/i.test(rw2[k - 1] || '');
+        if (jn && (sambung || k === rw2.length - 1 || k === 0) && !data.jenis) { data.jenis = jn; if (sambung) sisaNama.pop(); return; }
+        sisaNama.push(x);
+      });
+      const nm = sisaNama.join(' ').replace(/[^A-Za-zÀ-ÿ0-9&' \-]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (nm) data.nama = (nm === nm.toLowerCase() ? nm.replace(/(^|\s)([a-z])/g, (x, a, c) => a + c.toUpperCase()) : nm.replace(/^./, (c) => c.toUpperCase())).slice(0, 40);
+      return { type: 'atur', alur: 'kategori', data };
+    }
+    // ---- Kata kunci: "tambah kata kunci pakan kucing ke hewan", "tambh kta kunci ...", "kata kunci baru: ..." ----
+    j = -1;
+    let k0 = i;
+    const verba = kls[k0] === 'tambah';
+    if (verba) k0++;
+    if (kls[k0] === 'baru') k0++;
+    if (kls[k0] === 'kata' && kls[k0 + 1] === 'kunci') j = k0 + 2;
+    else if (kls[k0] === 'keyword' && kls[k0 + 1] === 'kata' && kls[k0 + 2] === 'kunci') j = k0 + 3;
+    else if ((kls[k0] === 'keyword' && (verba || LEKS_MIRIP.keyword.indexOf(w[k0].toLowerCase().replace(/[^a-z]/g, '')) > -1)) || (verba && kls[k0] === 'kunci')) j = k0 + 1;
+    else if (verba && kls[k0] === 'kata' && !/^(sandi|password|kunci\w*)$/i.test(w[k0 + 1] || '') && w.length > k0 + 1) j = k0 + 1;
+    if (j > -1) {
+      if (kls[j] === 'baru') j++;
+      const rest = sisa(j);
+      // tanpa kata kerja & tanpa isi ("kamus") → bukan perintah ini
+      if (!verba && !rest) return { type: 'kataKunci', kata: [], katTeks: '', kandidat: [] };
+      const r = pisahKunciKategori(rest, ctx, !verba);
+      return { type: 'kataKunci', kata: r.kata, katTeks: r.katTeks, kandidat: r.kandidat };
+    }
+    // ---- "masukkan pakan kucing ke kategori hewan", "pakan kucing masuk kategori hewan" ----
+    const t = t0.replace(/[?!.]+$/, '').trim();
+    if ((m = /^(?:tolong\s+)?(?:masukkan|masukin|masukan|taruh)\s+(?:kata\s+)?(.+?)\s+(?:ke\s+)?(?:dalam\s+)?(?:kategori|ktgr|katagori|katgori)\s+(.+)$/.exec(t)) ||
+      (m = /^(?:kata\s+)?(.+?)\s+(?:masuk(?:kan|in)?|termasuk)\s+(?:ke\s+)?(?:dalam\s+)?(?:kategori|ktgr|katagori|katgori)\s+(.+)$/.exec(t))) {
+      if (/^(apa|apaan|mana|yang mana)\b/.test(m[2]) || /^(uang|duit|transaksi|ini|itu)$/.test(m[1])) return null;
+      return { type: 'kataKunci', kata: daftarKata(m[1]), katTeks: m[2], kandidat: cariKategoriNama(m[2], ctx, true) };
+    }
+    return null;
+  }
+
+  // Saran kata kunci untuk kategori baru (tanpa AI): kamus tema bawaan + kata dari nama kategori + catatan "Lain-lain" yang mirip
+  const TEMA_KUNCI = [
+    { cocok: ['hewan', 'peliharaan', 'kucing', 'anjing', 'pet', 'piaraan', 'binatang', 'ternak'], kata: ['pakan kucing', 'makanan kucing', 'pasir kucing', 'dokter hewan', 'vaksin kucing', 'grooming', 'kandang', 'whiskas', 'vitamin hewan', 'pakan anjing', 'obat cacing kucing', 'pakan ayam'] },
+    { cocok: ['ikan', 'akuarium', 'aquarium'], kata: ['pakan ikan', 'ikan hias', 'filter akuarium', 'aerator', 'obat ikan', 'akuarium'] },
+    { cocok: ['burung'], kata: ['pakan burung', 'kandang burung', 'voer', 'jangkrik', 'vitamin burung'] },
+    { cocok: ['tanaman', 'kebun', 'taman', 'bunga'], kata: ['pupuk', 'bibit', 'pot', 'tanah', 'polybag', 'tanaman hias', 'obat hama', 'selang'] },
+    { cocok: ['olahraga', 'gym', 'fitness', 'futsal', 'badminton', 'sepeda', 'renang'], kata: ['gym', 'futsal', 'badminton', 'kok', 'raket', 'sewa lapangan', 'renang', 'sepatu olahraga', 'membership gym', 'jersey'] },
+    { cocok: ['bayi', 'baby', 'balita', 'susu', 'popok'], kata: ['popok', 'pampers', 'susu formula', 'tisu basah', 'baju bayi', 'bubur bayi', 'minyak telon', 'imunisasi'] },
+    { cocok: ['anak', 'sekolah', 'pendidikan', 'les', 'kursus', 'kuliah'], kata: ['spp', 'uang sekolah', 'buku', 'seragam', 'les', 'kursus', 'alat tulis', 'uang gedung', 'study tour', 'ukt'] },
+    { cocok: ['kado', 'hadiah', 'kondangan', 'acara', 'pesta', 'nikahan', 'ulang'], kata: ['kado', 'hadiah', 'kondangan', 'amplop', 'parsel', 'bingkisan', 'kue ulang tahun', 'sumbangan'] },
+    { cocok: ['sosial', 'sumbangan', 'donasi', 'arisan', 'iuran'], kata: ['sumbangan', 'donasi', 'arisan', 'iuran rt', 'iuran warga', 'kas rt', 'jimpitan', 'santunan'] },
+    { cocok: ['liburan', 'wisata', 'jalan', 'travel', 'mudik', 'piknik'], kata: ['tiket pesawat', 'tiket kapal', 'hotel', 'penginapan', 'villa', 'oleh oleh', 'tiket masuk', 'sewa mobil', 'tiket wisata'] },
+    { cocok: ['kecantikan', 'perawatan', 'salon', 'skincare', 'kosmetik', 'make', 'rambut'], kata: ['skincare', 'salon', 'potong rambut', 'facial', 'lipstik', 'bedak', 'serum', 'sabun muka', 'creambath', 'parfum'] },
+    { cocok: ['rokok', 'vape'], kata: ['rokok', 'korek', 'liquid vape', 'tembakau'] },
+    { cocok: ['cicilan', 'utang', 'hutang', 'kredit', 'pinjaman', 'angsuran', 'paylater'], kata: ['cicilan', 'angsuran', 'kredit', 'paylater', 'leasing', 'bayar utang', 'kartu kredit', 'pinjaman'] },
+    { cocok: ['laundry', 'cuci', 'loundry'], kata: ['laundry', 'cuci baju', 'setrika', 'cuci karpet', 'dry clean'] },
+    { cocok: ['kos', 'kost', 'sewa', 'kontrakan', 'kontrak'], kata: ['kos', 'kost', 'kontrakan', 'sewa rumah', 'sewa kamar', 'uang sewa'] },
+    { cocok: ['game', 'gaming', 'hiburan', 'streaming', 'nonton'], kata: ['top up game', 'diamond', 'netflix', 'spotify', 'youtube premium', 'bioskop', 'tiket konser'] },
+    { cocok: ['kopi', 'ngopi', 'cafe', 'kafe', 'nongkrong'], kata: ['kopi', 'es kopi', 'cafe', 'nongkrong', 'kopi susu', 'latte'] },
+    { cocok: ['motor', 'mobil', 'kendaraan', 'bensin', 'bbm'], kata: ['bensin', 'pertalite', 'pertamax', 'servis motor', 'ganti oli', 'cuci motor', 'parkir', 'tambal ban', 'pajak motor'] },
+    { cocok: ['dapur', 'masak', 'sayur', 'pasar'], kata: ['sayur', 'bumbu', 'beras', 'telur', 'minyak goreng', 'gas elpiji', 'ikan', 'ayam potong'] },
+    { cocok: ['usaha', 'jualan', 'bisnis', 'dagang', 'toko', 'modal', 'warung'], kata: ['modal', 'stok barang', 'bahan baku', 'kemasan', 'ongkir', 'kulakan', 'belanja stok'] },
+    { cocok: ['investasi', 'saham', 'reksadana', 'emas', 'deposito'], kata: ['saham', 'reksadana', 'emas', 'deposito', 'obligasi', 'crypto'] },
+    { cocok: ['orang', 'tua', 'ortu', 'mertua', 'saudara', 'keluarga', 'kiriman'], kata: ['kirim orang tua', 'uang bulanan ortu', 'kiriman ibu', 'uang mertua'] },
+    { cocok: ['kesehatan', 'obat', 'dokter', 'berobat'], kata: ['obat', 'dokter', 'apotek', 'vitamin', 'klinik', 'rumah sakit', 'bpjs', 'periksa'] },
+    { cocok: ['elektronik', 'gadget', 'hp', 'laptop', 'komputer'], kata: ['hp', 'laptop', 'charger', 'headset', 'casing hp', 'servis hp', 'mouse'] },
+    { cocok: ['pakaian', 'baju', 'fashion', 'sepatu', 'tas'], kata: ['baju', 'celana', 'sepatu', 'sandal', 'tas', 'jilbab', 'kaos', 'jaket'] },
+    // pemasukan
+    { jenis: 'MASUK', cocok: ['jualan', 'penjualan', 'dagang', 'usaha', 'toko', 'omzet', 'laku'], kata: ['hasil jualan', 'penjualan', 'omzet', 'laku', 'pesanan', 'orderan'] },
+    { jenis: 'MASUK', cocok: ['freelance', 'proyek', 'project', 'honor', 'fee', 'sampingan', 'lembur'], kata: ['honor', 'fee', 'proyek', 'lembur', 'insentif', 'uang lembur', 'job sampingan'] },
+    { jenis: 'MASUK', cocok: ['sewa', 'kos', 'kontrakan'], kata: ['uang sewa', 'bayar kos', 'sewa kontrakan', 'sewa kamar'] },
+    { jenis: 'MASUK', cocok: ['investasi', 'dividen', 'bunga', 'saham'], kata: ['dividen', 'bunga deposito', 'hasil investasi', 'imbal hasil'] },
+    { jenis: 'MASUK', cocok: ['tunjangan', 'thr', 'bonus'], kata: ['thr', 'tunjangan', 'bonus', 'insentif', 'rapel'] },
+    { jenis: 'MASUK', cocok: ['kiriman', 'transfer', 'pemberian'], kata: ['kiriman', 'dikasih', 'pemberian', 'uang dari ortu'] }
+  ];
+  const KATA_UMUM_NAMA = /^(online|offline|baru|lama|biaya|uang|kebutuhan|lain|lainnya|bulanan|harian|mingguan|pengeluaran|pemasukan|keluarga|dan|untuk|buat|yang|lain-lain|rutin|pribadi|dll|serta|juga)$/;
+  /** opsi.catatan: keterangan transaksi yang tadinya masuk "Lain-lain"/"Pemasukan Lain" (terbaru dulu) */
+  function saranKataKunci(namaKat, jenis, ctx, opsi) {
+    opsi = opsi || {};
+    const idx = siapkan(ctx);
+    const nm = normal(namaKat).replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+    const ws = nm.split(' ').filter((w) => w.length >= 3 && !KATA_UMUM_NAMA.test(w));
+    const sudah = {};
+    idx.kat.forEach((e) => { sudah[e.frasa] = e; });
+    const hasil = [], lihat = new Set();
+    // boleh "geser": kata bawaan dari kategori lain sejenis (mis. "arisan" dari Sosial ke kategori baru "Arisan")
+    const tambah = (f, bolehGeser) => {
+      f = normal(f).trim();
+      if (!f || lihat.has(f) || kataUmum(f)) return;
+      const e = sudah[f];
+      if (e && (e.target === opsi.katId || !bolehGeser || e.sumber !== 'BAWAAN' || !idx.katAktif[e.target] || idx.katAktif[e.target].jenis !== jenis)) { if (e) lihat.add(f); return; }
+      lihat.add(f);
+      hasil.push(f);
+    };
+    const cocokTema = (w) => (tm) => tm.cocok.some((c) => w === c || (c.length >= 4 && miripPerintah(w, c)) || (w.length >= 5 && c.indexOf(w) === 0));
+    const temaJenis = TEMA_KUNCI.filter((tm) => (tm.jenis || 'KELUAR') === jenis);
+    const temaUtama = ws.length ? temaJenis.filter(cocokTema(ws[0])) : [];
+    const temaCocok = temaJenis.filter((tm) => ws.some((w) => cocokTema(w)(tm)));
+    const kataTema = [].concat.apply([], temaUtama.concat(temaCocok.filter((tm) => temaUtama.indexOf(tm) < 0)).map((tm) => tm.kata));
+    const kataUtama = new Set([].concat.apply([], temaUtama.map((tm) => tm.kata)));
+    if (ws.length > 1) tambah(ws.join(' '), true);
+    if (ws.length === 1) tambah(ws[0], true);
+
+    // catatan "Lain-lain" yang berhubungan dengan nama/tema
+    const dekat = ws.concat(kataTema.join(' ').split(' ')).filter((w) => w.length >= 4);
+    (opsi.catatan || []).forEach((c) => {
+      const f = normal(c).replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 3).join(' ');
+      if (f && f.split(' ').some((w) => w.length >= 4 && dekat.some((d) => d === w || miripPerintah(w, d)))) tambah(f, false);
+    });
+    kataTema.forEach((f) => tambah(f, kataUtama.has(f)));
+    return hasil.slice(0, opsi.maks || 10);
+  }
+
   function aturDari(t0, raw, ctx, idx) {
     let m;
     const rawRapi = String(raw).trim().replace(/\s+/g, ' ');
@@ -1563,6 +1825,12 @@
       const nm = sisa.replace(/^(?:rekening|e-?wallet|tabungan|tunai)\s+/i, '').trim();
       if (nm) data.nama = nm.length <= 4 ? nm.toUpperCase() : nm.replace(/^./, (c) => c.toUpperCase());
       return { type: 'atur', alur: 'dompet', data };
+    }
+    // 1.0.33: hapus dompet ("hapus dompet rekening saudara", "hps dompt bca", "hapus rek saudara")
+    if ((m = /^(?:tolong\s+)?(?:hapus|hapuskan|hapusin|apus|apusin|hps|buang|hilangkan|delete|singkirkan)\s+(?:dompet|dompt|dmpet|dompetnya|dompet\s+baru)(?:\s+(.+))?$/.exec(t))) return { type: 'dompetHapus', teks: (m[1] || '').replace(/^(?:yang\s+)?(?:bernama|namanya|nama)\s+/, '').trim() };
+    if ((m = /^(?:tolong\s+)?(?:hapus|hapuskan|hapusin|apus|hps|buang|hilangkan|delete)\s+(.+)$/.exec(t)) && !/\d/.test(m[1])) {
+      const isi = m[1].replace(/\s+(?:ya|dong|aja|saja)$/, '').trim();
+      if (idx.dompet.some((e) => e.nama && e.frasa === isi && e.frasa.indexOf(' ') > 0)) return { type: 'dompetHapus', teks: isi };
     }
     // Target tabungan
     if (/^(?:(?:lihat|daftar|cek|tampilkan)\s+)?(?:semua\s+)?target(?:\s+(?:tabungan|nabung|menabung))?(?:\s+(?:saya|ku|kita|keluarga))?(?:\s+apa\s+(?:saja|aja))?$/.test(t) && !/^target$/.test(t) || /^(?:daftar|lihat)\s+target$/.test(t) || /^target$/.test(t)) return { type: 'targetDaftar' };
@@ -1849,6 +2117,8 @@
     if (sp) return sp;
     const klo = kelolaDari(t0, ctx, idx);
     if (klo) return klo;
+    const kk = kategoriKunciDari(t0, raw, ctx);
+    if (kk) return kk;
     const atr = aturDari(t0, raw, ctx, idx);
     if (atr) return atr;
     const pn = penasihatDari(t0, raw, ctx);
@@ -2235,7 +2505,7 @@
 
   const Parser = { analisis, periode, nominalSaja, normal, cariNominal, siapkan, lev, BULAN, dompetDari, kataUmum, KATA_GANDA, cariKategoriNama, frasaIngat, frasaKonteks,
     aturan, ATURAN_BAWAAN, koreksi, skorKandidat, osa, jamDari, jadwalDari, cariIngatan, tokenLabel,
-    tenggatDari, peranDari, tipeDompetDari, tujuanDari, angkaKata: angkaDariKata, JENIS_TUJUAN, PEMICU_BAWAAN,
+    tenggatDari, peranDari, tipeDompetDari, tujuanDari, angkaKata: angkaDariKata, JENIS_TUJUAN, PEMICU_BAWAAN, saranKataKunci, daftarKata,
     catatan: { struktur: strukturCatatan, cari: cariCatatan, tampil: tampilCatatan, kataKunci: (t, ctx) => kataKunci(t, petaAlias(ctx)), adaKata: adaKataCatatan, ALIAS_BAWAAN, miripKata } };
   g.Parser = Parser;
   if (typeof module !== 'undefined') module.exports = Parser;
